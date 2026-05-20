@@ -46,9 +46,6 @@ import java.util.stream.Collectors;
 
 /**
  * 效果评测接口
- * <p>
- * 仅运行 {@code rewrite → intent → retrieve} 三步，不走 LLM，不污染对话表 / trace 表。
- * 评测项目调本接口取检索证据（docIds / chunkIds / contexts），LLM 输出通过 /rag/v3/chat 单独取。
  */
 @RestController
 @RequiredArgsConstructor
@@ -113,12 +110,7 @@ public class EvalController {
     }
 
     /**
-     * 通过 chunkId 反查 t_knowledge_chunk.docId，**保持输入 chunkIds 的顺序**后再按 docId 去重保留首次出现。
-     * <p>
-     * 注意：{@link com.baomidou.mybatisplus.core.mapper.BaseMapper#selectByIds(java.util.Collection)}
-     * 生成的 SQL 形如 {@code WHERE id IN (...)}，DB 按主键物理顺序返回行，不保证与传入顺序一致。
-     * 若直接 stream 取 docId，会让 retrievedDocIds 与 retrievedChunkIds / retrievedContexts 错位，
-     * 进而污染评测项目里基于排名的 Hit@1 / Hit@3 / MRR 等指标。这里显式按 chunkIds 重排后再 dedupe。
+     * 通过 chunkId 反查 t_knowledge_chunk.docId，保持输入 chunkIds 的顺序后再按 docId 去重保留首次出现
      */
     private List<String> lookupDocIds(List<String> chunkIds) {
         if (CollUtil.isEmpty(chunkIds)) {
