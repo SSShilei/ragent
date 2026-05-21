@@ -30,7 +30,7 @@ import java.util.List;
 public class EvalResponse {
 
     /**
-     * 召回的文档 ID 列表（业务 docId，已去重；通过 chunkId 反查 t_knowledge_chunk.docId）
+     * 召回的业务文档 ID 列表（已去重；从 t_knowledge_document.doc_name 剥文件后缀得到，对齐评测集 reference_doc_ids）
      */
     private List<String> retrievedDocIds;
 
@@ -43,6 +43,12 @@ public class EvalResponse {
      * 召回的 chunk 文本列表（与 retrievedChunkIds 顺序对应）
      */
     private List<String> retrievedContexts;
+
+    /**
+     * 与 retrievedContexts 一一对应的业务 docId 列表（chunk 维度、长度相同、保留 null、不去重）
+     * 评测脚本计算 context_precision / context_recall 等 chunk 级指标时按 index 直接取用
+     */
+    private List<String> retrievedContextDocIds;
 
     /**
      * MCP 工具调用结果（无 MCP 分支时为空字符串）

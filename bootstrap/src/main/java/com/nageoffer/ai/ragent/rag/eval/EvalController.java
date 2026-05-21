@@ -21,7 +21,9 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeChunkDO;
+import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeDocumentDO;
 import com.nageoffer.ai.ragent.knowledge.dao.mapper.KnowledgeChunkMapper;
+import com.nageoffer.ai.ragent.knowledge.dao.mapper.KnowledgeDocumentMapper;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentResolver;
 import com.nageoffer.ai.ragent.rag.core.retrieve.RetrievalEngine;
@@ -57,6 +59,7 @@ public class EvalController {
     private final RetrievalEngine retrievalEngine;
     private final SearchChannelProperties searchProperties;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
+    private final KnowledgeDocumentMapper knowledgeDocumentMapper;
 
     @GetMapping("/rag/eval")
     public Result<EvalResponse> chat(@RequestParam String question) {
@@ -78,12 +81,17 @@ public class EvalController {
         List<String> contexts = uniqueChunks.stream()
                 .map(RetrievedChunk::getText)
                 .collect(Collectors.toList());
-        List<String> docIds = lookupDocIds(chunkIds);
+
+        // chunk 维度的 docId 列表：与 contexts 一一对应、保留 null、不去重
+        List<String> contextDocIds = resolveContextDocIds(uniqueChunks);
+        // doc 维度的 docId 列表：保持原语义（按 chunk 顺序首次出现、过滤 null）
+        List<String> docIds = dedupNonBlank(contextDocIds);
 
         return EvalResponse.builder()
                 .retrievedDocIds(docIds)
                 .retrievedChunkIds(chunkIds)
                 .retrievedContexts(contexts)
+                .retrievedContextDocIds(contextDocIds)
                 .mcpContext(rc == null ? null : rc.getMcpContext())
                 .hasMcp(rc != null && rc.hasMcp())
                 .hasKb(rc != null && rc.hasKb())
@@ -110,25 +118,74 @@ public class EvalController {
     }
 
     /**
-     * 通过 chunkId 反查 t_knowledge_chunk.docId，保持输入 chunkIds 的顺序后再按 docId 去重保留首次出现
+     * 与 chunks 一一对应的业务 docId 列表（长度相同、保留 null、不去重）
+     * 链路：chunkId → t_knowledge_chunk.docId（雪花）→ t_knowledge_document.doc_name → 剥文件后缀
+     * 评测集的 reference_doc_ids 用业务码（如 `FAQ_VAC_001`），与此处对齐
      */
-    private List<String> lookupDocIds(List<String> chunkIds) {
-        if (CollUtil.isEmpty(chunkIds)) {
-            return Collections.emptyList();
-        }
-        List<KnowledgeChunkDO> chunks = knowledgeChunkMapper.selectByIds(chunkIds);
+    private List<String> resolveContextDocIds(List<RetrievedChunk> chunks) {
         if (CollUtil.isEmpty(chunks)) {
             return Collections.emptyList();
         }
-        Map<String, String> chunkIdToDocId = chunks.stream()
+        List<String> chunkIdsForLookup = chunks.stream()
+                .map(RetrievedChunk::getId)
+                .filter(StrUtil::isNotBlank)
+                .distinct()
+                .collect(Collectors.toList());
+        if (chunkIdsForLookup.isEmpty()) {
+            return new java.util.ArrayList<>(Collections.nCopies(chunks.size(), null));
+        }
+        // 第一跳：chunkId → 雪花 docId
+        Map<String, String> chunkIdToInternalDocId = knowledgeChunkMapper.selectByIds(chunkIdsForLookup).stream()
                 .filter(c -> StrUtil.isNotBlank(c.getId()) && StrUtil.isNotBlank(c.getDocId()))
                 .collect(Collectors.toMap(
                         KnowledgeChunkDO::getId,
                         KnowledgeChunkDO::getDocId,
                         (a, b) -> a));
+        // 第二跳：雪花 docId → 业务码（doc_name 剥后缀）
+        List<String> internalDocIds = chunkIdToInternalDocId.values().stream().distinct().collect(Collectors.toList());
+        Map<String, String> internalToBizDocId = internalDocIds.isEmpty()
+                ? Map.of()
+                : knowledgeDocumentMapper.selectByIds(internalDocIds).stream()
+                        .filter(d -> StrUtil.isNotBlank(d.getId()) && StrUtil.isNotBlank(d.getDocName()))
+                        .collect(Collectors.toMap(
+                                KnowledgeDocumentDO::getId,
+                                d -> stripExtension(d.getDocName()),
+                                (a, b) -> a));
+        // 按 chunks 原顺序展开（null 占位保留）
+        return chunks.stream()
+                .map(c -> {
+                    if (StrUtil.isBlank(c.getId())) {
+                        return null;
+                    }
+                    String internal = chunkIdToInternalDocId.get(c.getId());
+                    if (StrUtil.isBlank(internal)) {
+                        return null;
+                    }
+                    return internalToBizDocId.get(internal);
+                })
+                .collect(Collectors.toCollection(java.util.ArrayList::new));
+    }
+
+    /**
+     * 剥掉最后一个 `.` 之后的文件扩展名；无后缀则原样返回
+     */
+    private static String stripExtension(String docName) {
+        if (docName == null) {
+            return null;
+        }
+        int dot = docName.lastIndexOf('.');
+        return (dot > 0 && dot < docName.length() - 1) ? docName.substring(0, dot) : docName;
+    }
+
+    /**
+     * 按首次出现顺序去重并过滤空值
+     */
+    private List<String> dedupNonBlank(List<String> in) {
+        if (CollUtil.isEmpty(in)) {
+            return Collections.emptyList();
+        }
         Set<String> seen = new LinkedHashSet<>();
-        return chunkIds.stream()
-                .map(chunkIdToDocId::get)
+        return in.stream()
                 .filter(StrUtil::isNotBlank)
                 .filter(seen::add)
                 .collect(Collectors.toList());
