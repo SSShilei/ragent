@@ -456,9 +456,55 @@ export function RagTraceDetailPage() {
         }
         : null;
 
+    // 使用 parentNodeId 构建树，DFS 遍历确定显示顺序
+    const childrenMap = new Map<string, typeof normalized>();
+    const treeRoots: typeof normalized = [];
+
+    for (const node of normalized) {
+      const parentId = node.parentNodeId;
+      if (!parentId) {
+        treeRoots.push(node);
+      } else {
+        let siblings = childrenMap.get(parentId);
+        if (!siblings) {
+          siblings = [];
+          childrenMap.set(parentId, siblings);
+        }
+        siblings.push(node);
+      }
+    }
+
+    const sortSiblings = (list: typeof normalized) =>
+        list.sort((a, b) => a.startTs - b.startTs || a.depthValue - b.depthValue);
+
+    sortSiblings(treeRoots);
+    for (const siblings of childrenMap.values()) {
+      sortSiblings(siblings);
+    }
+
+    const ordered: typeof normalized = [];
+    const dfsStack = [...treeRoots].reverse();
+    while (dfsStack.length > 0) {
+      const node = dfsStack.pop()!;
+      ordered.push(node);
+      const children = childrenMap.get(node.nodeId);
+      if (children) {
+        for (let i = children.length - 1; i >= 0; i--) {
+          dfsStack.push(children[i]);
+        }
+      }
+    }
+
+    const orderedSet = new Set(ordered.map(n => n.nodeId));
+    for (const node of normalized) {
+      if (!orderedSet.has(node.nodeId)) {
+        ordered.push(node);
+      }
+    }
+
     const rows = [
       ...(rootRow ? [rootRow] : []),
-      ...normalized.sort((a, b) => a.startTs - b.startTs || a.depthValue - b.depthValue)
+      ...ordered
     ].map((node) => {
       const offsetMs = node.startTs > 0 ? Math.max(0, node.startTs - baseStart) : 0;
       const leftPercent = clamp((offsetMs / windowDuration) * 100, 0, 99.2);
