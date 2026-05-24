@@ -525,13 +525,14 @@ export function KnowledgeDocumentsPage() {
           ) : documents.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">暂无文档</div>
           ) : (
-            <Table className="min-w-[750px]">
+            <Table className="min-w-[850px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[280px]">文档</TableHead>
                   <TableHead className="w-[110px]">状态</TableHead>
                   <TableHead className="w-[70px]">启用</TableHead>
                   <TableHead className="w-[80px]">分块数</TableHead>
+                  <TableHead className="w-[100px]">更新人</TableHead>
                   <TableHead className="w-[160px]">更新时间</TableHead>
                   <TableHead className="w-[140px] text-left">操作</TableHead>
                 </TableRow>
@@ -593,6 +594,7 @@ export function KnowledgeDocumentsPage() {
                       })()}
                     </TableCell>
                     <TableCell>{doc.chunkCount ?? "-"}</TableCell>
+                    <TableCell className="truncate" title={doc.updatedBy || ""}>{doc.updatedBy || "-"}</TableCell>
                     <TableCell>{formatDate(doc.updateTime)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-0.5">
