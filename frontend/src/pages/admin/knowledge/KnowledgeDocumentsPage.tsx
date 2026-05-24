@@ -17,6 +17,8 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { format, differenceInMinutes, differenceInHours, differenceInDays } from "date-fns";
 
 import type { KnowledgeBase, KnowledgeDocument, KnowledgeDocumentUploadPayload, KnowledgeDocumentChunkLog, PageResult, ChunkStrategyOption } from "@/services/knowledgeService";
 import {
@@ -81,17 +83,67 @@ const statusDotClass = (status?: string | null) => {
   return "bg-muted-foreground/40";
 };
 
-const formatDate = (value?: string | null) => {
+const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+const getWeekStart = (d: Date) => {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  date.setDate(date.getDate() - diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const formatRelativeNumeric = (value: string) => {
+  const date = new Date(value);
+  const diffMinutes = differenceInMinutes(new Date(), date);
+  const diffHours = differenceInHours(new Date(), date);
+  const diffDays = differenceInDays(new Date(), date);
+  if (diffMinutes < 1) return "刚刚";
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+  if (diffHours < 24) return `${diffHours} 小时前`;
+  return `${diffDays} 天前`;
+};
+
+const formatRelativeTime = (value?: string | null) => {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  const yy = String(date.getFullYear()).slice(2);
-  const mm = date.getMonth() + 1;
-  const dd = date.getDate();
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mi = String(date.getMinutes()).padStart(2, "0");
-  const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${yy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+  const now = new Date();
+  const diffMinutes = differenceInMinutes(now, date);
+  const diffHours = differenceInHours(now, date);
+  if (diffMinutes < 1) return "刚刚";
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+  if (date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
+    return `${diffHours} 小时前`;
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth() && date.getFullYear() === yesterday.getFullYear()) {
+    return `昨天 ${format(date, "HH:mm")}`;
+  }
+  const weekStart = getWeekStart(now);
+  if (date >= weekStart) {
+    return `${WEEKDAY_NAMES[date.getDay()]} ${format(date, "HH:mm")}`;
+  }
+  if (date.getFullYear() === now.getFullYear()) {
+    return format(date, "M月d日");
+  }
+  return format(date, "yyyy年M月d日");
+};
+
+const formatFullDateTime = (value?: string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return format(date, "yyyy-MM-dd HH:mm:ss");
+};
+
+const formatTooltipTime = (value?: string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${format(date, "yyyy-MM-dd HH:mm:ss")} · ${formatRelativeNumeric(value)}`;
 };
 
 const formatSize = (size?: number | null) => {
@@ -175,6 +227,65 @@ export function KnowledgeDocumentsPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const documents = pageData?.records || [];
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchOperating, setBatchOperating] = useState(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (documents.length === 0) return;
+    if (selectedIds.size === documents.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(documents.map((d) => String(d.id))));
+    }
+  };
+
+  const handleBatchChunk = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchOperating(true);
+    let done = 0;
+    try {
+      for (const id of selectedIds) {
+        await startDocumentChunk(id);
+        done++;
+      }
+      toast.success(`已触发 ${done} 个文档分块`);
+      setSelectedIds(new Set());
+      await loadDocuments(current, statusFilter, keyword);
+    } catch (error) {
+      toast.error(getErrorMessage(error, `已处理 ${done}/${selectedIds.size}，操作中断`));
+    } finally {
+      setBatchOperating(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchOperating(true);
+    let done = 0;
+    try {
+      for (const id of selectedIds) {
+        await deleteDocument(id);
+        done++;
+      }
+      toast.success(`已删除 ${done} 个文档`);
+      setSelectedIds(new Set());
+      setCurrent(1);
+      await loadDocuments(1, statusFilter, keyword);
+    } catch (error) {
+      toast.error(getErrorMessage(error, `已处理 ${done}/${selectedIds.size}，操作中断`));
+    } finally {
+      setBatchOperating(false);
+    }
+  };
 
   const loadKnowledgeBase = async () => {
     if (!kbId) return;
@@ -525,21 +636,62 @@ export function KnowledgeDocumentsPage() {
           ) : documents.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">暂无文档</div>
           ) : (
-            <Table className="min-w-[910px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[280px]">文档</TableHead>
-                  <TableHead className="w-[110px]">状态</TableHead>
-                  <TableHead className="w-[70px]">启用</TableHead>
-                  <TableHead className="w-[80px]">分块数</TableHead>
-                  <TableHead className="w-[100px]">更新人</TableHead>
-                  <TableHead className="w-[160px]">更新时间</TableHead>
-                  <TableHead className="w-[200px] text-left">操作</TableHead>
-                </TableRow>
-              </TableHeader>
+            <>
+              {selectedIds.size > 0 && (
+                <div className="mb-4 flex items-center gap-2 rounded-md border bg-card px-4 py-2.5 shadow-sm">
+                  <span className="text-sm tabular-nums">
+                    已选择 <span className="font-semibold">{selectedIds.size}</span> 项
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    取消
+                  </button>
+                  <div className="mx-2 h-5 w-px bg-border" />
+                  <Button size="sm" variant="ghost" onClick={handleBatchChunk} disabled={batchOperating}>
+                    <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
+                    批量分块
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => setBatchDeleteOpen(true)}
+                    disabled={batchOperating}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    批量删除
+                  </Button>
+                </div>
+              )}
+              <Table className="min-w-[910px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[40px]">
+                      <Checkbox
+                        checked={documents.length > 0 && selectedIds.size === documents.length}
+                        onCheckedChange={toggleSelectAll}
+                      />
+                    </TableHead>
+                    <TableHead className="w-[280px]">文档</TableHead>
+                    <TableHead className="w-[110px]">状态</TableHead>
+                    <TableHead className="w-[70px]">启用</TableHead>
+                    <TableHead className="w-[80px]">分块数</TableHead>
+                    <TableHead className="w-[180px]">更新时间</TableHead>
+                    <TableHead className="w-[170px] text-left">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
               <TableBody>
                 {documents.map((doc) => (
                   <TableRow key={doc.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(String(doc.id))}
+                        onCheckedChange={() => toggleSelect(String(doc.id))}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2.5 min-w-0 max-w-[320px]">
                         {renderFileTypeIcon(doc.fileType, doc.sourceType)}
@@ -603,26 +755,42 @@ export function KnowledgeDocumentsPage() {
                         );
                       })()}
                     </TableCell>
-                    <TableCell>{doc.chunkCount ?? "-"}</TableCell>
-                    <TableCell className="truncate" title={doc.updatedBy || ""}>{doc.updatedBy || "-"}</TableCell>
-                    <TableCell>{formatDate(doc.updateTime)}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
+                      {doc.chunkCount != null && doc.chunkCount > 0 ? (
+                        <span className="tabular-nums">{doc.chunkCount}</span>
+                      ) : (
+                        <span className="text-muted-foreground/35">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-default truncate text-sm tabular-nums">
+                              {doc.updatedBy || "-"}<span className="text-muted-foreground"> · </span>{formatRelativeTime(doc.updateTime)}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{formatTooltipTime(doc.updateTime)}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
                         {(doc.fileType === "markdown" || doc.fileType === "pdf") ? (
                           <Button
                             size="sm"
-                            variant="ghost"
-                            className="h-8 gap-1 px-2 text-xs"
+                            variant="outline"
                             onClick={() => handlePreview(doc)}
                           >
-                            <Eye className="h-3.5 w-3.5" />
+                            <Eye className="h-4 w-4 mr-1" />
                             预览
                           </Button>
                         ) : null}
                         <Button
                           size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1 px-2 text-xs"
+                          variant="outline"
                           onClick={async () => {
                             try {
                               const detail = await getDocument(String(doc.id));
@@ -632,16 +800,15 @@ export function KnowledgeDocumentsPage() {
                             }
                           }}
                         >
-                          <Pencil className="h-3.5 w-3.5" />
+                          <Pencil className="h-4 w-4 mr-1" />
                           编辑
                         </Button>
                         <Button
                           size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1 px-2 text-xs"
+                          variant="outline"
                           onClick={() => setChunkTarget(doc)}
                         >
-                          <PlayCircle className="h-3.5 w-3.5" />
+                          <PlayCircle className="h-4 w-4 mr-1" />
                           分块
                         </Button>
                         <DropdownMenu>
@@ -670,6 +837,7 @@ export function KnowledgeDocumentsPage() {
                 ))}
               </TableBody>
             </Table>
+            </>
           )}
 
           {pageData ? (
@@ -721,6 +889,29 @@ export function KnowledgeDocumentsPage() {
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
               删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={batchDeleteOpen} onOpenChange={(open) => (!open ? setBatchDeleteOpen(false) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认批量删除？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除选中的 {selectedIds.size} 个文档，且向量数据会清理。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setBatchDeleteOpen(false);
+                await handleBatchDelete();
+              }}
+              className="bg-destructive text-destructive-foreground"
+            >
+              删除 {selectedIds.size} 个文档
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1053,9 +1244,9 @@ export function KnowledgeDocumentsPage() {
                   {/* 执行时间 */}
                   <div className="flex items-center gap-2 text-sm text-slate-500">
                     <span>执行时间</span>
-                    <span className="tabular-nums text-slate-700">{formatDate(log.startTime)}</span>
+                    <span className="tabular-nums text-slate-700">{formatFullDateTime(log.startTime)}</span>
                     <span>~</span>
-                    <span className="tabular-nums text-slate-700">{log.endTime ? formatDate(log.endTime) : "进行中"}</span>
+                    <span className="tabular-nums text-slate-700">{log.endTime ? formatFullDateTime(log.endTime) : "进行中"}</span>
                   </div>
 
                   {/* 错误信息 */}
