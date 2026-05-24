@@ -222,7 +222,7 @@ export function UserListPage() {
                       <TableCell>
                         <Badge variant={user.role === "admin" ? "default" : "secondary"}>{roleLabel}</Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{formatDate(user.createTime)}</TableCell>
+                      <TableCell>{formatDate(user.createTime)}</TableCell>
                       <TableCell><RelativeTime value={user.updateTime} /></TableCell>
                       <TableCell className="text-center">
                         <div className="flex justify-center gap-2">

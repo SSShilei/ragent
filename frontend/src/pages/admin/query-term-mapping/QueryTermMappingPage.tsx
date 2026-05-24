@@ -266,7 +266,7 @@ export function QueryTermMappingPage() {
                     <TableCell className="max-w-[160px] truncate text-muted-foreground" title={item.remark || ""}>
                       {item.remark || "-"}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell>
                       {formatDate(item.createTime)}
                     </TableCell>
                     <TableCell>

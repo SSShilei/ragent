@@ -733,7 +733,6 @@ export function KnowledgeDocumentsPage() {
                 ))}
               </TableBody>
             </Table>
-            </>
           )}
 
           {pageData ? (
@@ -1166,6 +1165,45 @@ export function KnowledgeDocumentsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {selectedIds.size > 0 && (
+        <div className="fixed inset-x-0 bottom-6 z-50 flex justify-center">
+          <div className="animate-fade-up rounded-2xl bg-slate-900 px-5 py-3 text-sm text-white shadow-[0_10px_40px_rgba(0,0,0,0.15)]">
+            <div className="flex items-center gap-3">
+              <Check className="h-4 w-4 text-emerald-400" />
+              <span className="tabular-nums font-medium">
+                已选 {selectedIds.size} 项
+              </span>
+              <div className="mx-1 h-5 w-px bg-white/20" />
+              <button
+                type="button"
+                onClick={handleBatchChunk}
+                disabled={batchOperating}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+              >
+                <PlayCircle className="h-4 w-4" />
+                批量分块
+              </button>
+              <button
+                type="button"
+                onClick={() => setBatchDeleteOpen(true)}
+                disabled={batchOperating}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-red-400 transition-colors hover:bg-white/10 hover:text-red-300 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                删除
+              </button>
+              <div className="mx-1 h-5 w-px bg-white/20" />
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="rounded-lg p-1.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

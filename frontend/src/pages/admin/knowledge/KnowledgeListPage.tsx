@@ -351,7 +351,7 @@ export function KnowledgeListPage() {
                     </TableCell>
                     <TableCell>{kb.documentCount ?? "-"}</TableCell>
                     <TableCell>{kb.createdBy || "-"}</TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell>
                       {formatDate(kb.createTime)}
                     </TableCell>
                     <TableCell>
