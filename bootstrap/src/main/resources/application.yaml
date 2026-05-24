@@ -57,7 +57,7 @@ rag:
   rate-limit:
     global:
       enabled: true
-      max-concurrent: 1
+      max-concurrent: 10
       max-wait-seconds: 15
       lease-seconds: 30
       poll-interval-ms: 200
