@@ -328,6 +328,10 @@ export const batchToggleChunks = async (
   );
 };
 
+export const previewDocument = async (docId: string): Promise<string> => {
+  return api.get<unknown, string>(`/knowledge-base/docs/${docId}/preview`);
+};
+
 // 文档分块日志管理
 export const getChunkLogsPage = async (
   docId: string,

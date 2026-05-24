@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Check, FileUp, FolderOpen, PlayCircle, RefreshCw, Trash2, Pencil, FileBarChart, X } from "lucide-react";
+import { Check, FileUp, FolderOpen, PlayCircle, RefreshCw, Trash2, Pencil, FileBarChart, X, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -11,7 +11,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,10 +28,12 @@ import {
   startDocumentChunk,
   uploadDocument,
   getChunkStrategies,
-  getChunkLogsPage
+  getChunkLogsPage,
+  previewDocument
 } from "@/services/knowledgeService";
 import { getIngestionPipelines, type IngestionPipeline } from "@/services/ingestionService";
 import { getSystemSettings } from "@/services/settingsService";
+import { MarkdownRenderer } from "@/components/chat/MarkdownRenderer";
 import { getErrorMessage } from "@/utils/error";
 
 const PAGE_SIZE = 10;
@@ -93,6 +95,16 @@ const formatSize = (size?: number | null) => {
   return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
 };
 
+const parseFrontMatter = (content: string): { head: string | null; body: string } => {
+  if (content.startsWith("---\n")) {
+    const end = content.indexOf("\n---\n", 4);
+    if (end > 0) {
+      return { head: content.substring(4, end), body: content.substring(end + 5) };
+    }
+  }
+  return { head: null, body: content };
+};
+
 const formatSourceLabel = (sourceType?: string | null) => {
   const normalized = sourceType?.toLowerCase();
   if (normalized === "url") return "Remote URL";
@@ -137,6 +149,9 @@ export function KnowledgeDocumentsPage() {
   const [logTarget, setLogTarget] = useState<KnowledgeDocument | null>(null);
   const [logData, setLogData] = useState<PageResult<KnowledgeDocumentChunkLog> | null>(null);
   const [logLoading, setLogLoading] = useState(false);
+  const [previewTarget, setPreviewTarget] = useState<KnowledgeDocument | null>(null);
+  const [previewContent, setPreviewContent] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const documents = pageData?.records || [];
 
@@ -340,6 +355,21 @@ export function KnowledgeDocumentsPage() {
   const handleOpenChunkLogs = (doc: KnowledgeDocument) => {
     setLogTarget(doc);
     loadChunkLogs(String(doc.id));
+  };
+
+  const handlePreview = async (doc: KnowledgeDocument) => {
+    setPreviewTarget(doc);
+    setPreviewContent("");
+    setPreviewLoading(true);
+    try {
+      const content = await previewDocument(String(doc.id));
+      setPreviewContent(content);
+    } catch (error) {
+      toast.error(getErrorMessage(error, "加载预览失败"));
+      setPreviewTarget(null);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const formatDuration = (ms?: number | null) => {
@@ -548,6 +578,16 @@ export function KnowledgeDocumentsPage() {
                     <TableCell>{formatDate(doc.updateTime)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
+                        {doc.fileType === "markdown" ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handlePreview(doc)}
+                            title="预览"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        ) : null}
                         <Button
                           size="icon"
                           variant="ghost"
@@ -851,6 +891,36 @@ export function KnowledgeDocumentsPage() {
               {detailSaving ? "保存中..." : "保存"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(previewTarget)} onOpenChange={(open) => (!open ? setPreviewTarget(null) : null)}>
+        <DialogContent hideClose className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-[900px] p-0" onOpenAutoFocus={(e) => e.preventDefault()} onCloseAutoFocus={(e) => { e.preventDefault(); requestAnimationFrame(() => (document.activeElement as HTMLElement)?.blur()); }}>
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-card px-6 py-3">
+            <span className="text-sm font-medium text-muted-foreground truncate">{previewTarget?.docName || "预览"}</span>
+            <DialogClose className="rounded-md p-1.5 opacity-50 transition-all hover:opacity-100 hover:bg-muted focus-visible:outline-none">
+              <X className="h-3.5 w-3.5" />
+            </DialogClose>
+          </div>
+          {previewLoading ? (
+            <div className="py-8 text-center text-muted-foreground">加载中...</div>
+          ) : previewContent ? (
+            (() => {
+              const { head, body } = parseFrontMatter(previewContent);
+              return (
+                <div className="flex-1 overflow-y-auto sidebar-scroll">
+                  {head ? (
+                    <pre className="mx-6 mt-4 overflow-auto rounded-lg border bg-slate-50 px-4 py-3 font-mono text-xs leading-relaxed text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+                      {head}
+                    </pre>
+                  ) : null}
+                  <div className="px-6 py-4">
+                    <MarkdownRenderer content={body} />
+                  </div>
+                </div>
+              );
+            })()
+          ) : null}
         </DialogContent>
       </Dialog>
 

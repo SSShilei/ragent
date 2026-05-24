@@ -139,4 +139,12 @@ public class KnowledgeDocumentController {
                                                                    Page<KnowledgeDocumentChunkLogVO> page) {
         return Results.success(documentService.getChunkLogs(docId, page));
     }
+
+    /**
+     * 预览 markdown 文档内容
+     */
+    @GetMapping("/knowledge-base/docs/{docId}/preview")
+    public Result<String> preview(@PathVariable String docId) {
+        return Results.success(documentService.preview(docId));
+    }
 }
