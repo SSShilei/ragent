@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Check, FileUp, FolderOpen, PlayCircle, RefreshCw, Trash2, Pencil, FileBarChart, X, Eye } from "lucide-react";
+import { Check, FileUp, FolderOpen, PlayCircle, RefreshCw, Trash2, Pencil, FileBarChart, X, Eye, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -500,19 +501,17 @@ export function KnowledgeDocumentsPage() {
           ) : documents.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">暂无文档</div>
           ) : (
-            <Table className="min-w-[1120px]">
+            <Table className="min-w-[980px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[260px]">文档</TableHead>
-                  <TableHead className="w-[120px]">来源</TableHead>
-                  <TableHead className="w-[120px]">处理模式</TableHead>
-                  <TableHead className="w-[120px]">状态</TableHead>
-                  <TableHead className="w-[80px]">启用</TableHead>
-                  <TableHead className="w-[90px]">分块数</TableHead>
-                  <TableHead className="w-[90px]">类型</TableHead>
-                  <TableHead className="w-[90px]">大小</TableHead>
-                  <TableHead className="w-[170px]">更新时间</TableHead>
-                  <TableHead className="w-[160px] text-left">操作</TableHead>
+                  <TableHead className="w-[130px]">来源 · 模式</TableHead>
+                  <TableHead className="w-[110px]">状态</TableHead>
+                  <TableHead className="w-[70px]">启用</TableHead>
+                  <TableHead className="w-[80px]">分块数</TableHead>
+                  <TableHead className="w-[120px]">类型 · 大小</TableHead>
+                  <TableHead className="w-[160px]">更新时间</TableHead>
+                  <TableHead className="w-[180px] text-left">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -533,12 +532,7 @@ export function KnowledgeDocumentsPage() {
                     </TableCell>
                     <TableCell>
                       <span className="text-xs text-muted-foreground">
-                        {formatSourceLabel(doc.sourceType)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">
-                        {doc.processMode || "-"}
+                        {formatSourceLabel(doc.sourceType)}{doc.processMode ? ` · ${doc.processMode}` : ""}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -573,24 +567,29 @@ export function KnowledgeDocumentsPage() {
                       })()}
                     </TableCell>
                     <TableCell>{doc.chunkCount ?? "-"}</TableCell>
-                    <TableCell>{doc.fileType || "-"}</TableCell>
-                    <TableCell>{formatSize(doc.fileSize)}</TableCell>
+                    <TableCell>
+                      <span className="text-xs text-muted-foreground">
+                        {doc.fileType || "-"}{doc.fileSize ? ` · ${formatSize(doc.fileSize)}` : ""}
+                      </span>
+                    </TableCell>
                     <TableCell>{formatDate(doc.updateTime)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
+                    <TableCell>
+                      <div className="flex items-center gap-0.5">
                         {doc.fileType === "markdown" ? (
                           <Button
-                            size="icon"
+                            size="sm"
                             variant="ghost"
+                            className="h-7 px-1.5 text-xs"
                             onClick={() => handlePreview(doc)}
-                            title="预览"
                           >
-                            <Eye className="h-4 w-4" />
+                            <Eye className="mr-1 h-3.5 w-3.5" />
+                            预览
                           </Button>
                         ) : null}
                         <Button
-                          size="icon"
+                          size="sm"
                           variant="ghost"
+                          className="h-7 px-1.5 text-xs"
                           onClick={async () => {
                             try {
                               const detail = await getDocument(String(doc.id));
@@ -599,35 +598,39 @@ export function KnowledgeDocumentsPage() {
                               toast.error(getErrorMessage(error, "加载文档详情失败"));
                             }
                           }}
-                          title="编辑"
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Pencil className="mr-1 h-3.5 w-3.5" />
+                          编辑
                         </Button>
                         <Button
-                          size="icon"
+                          size="sm"
                           variant="ghost"
+                          className="h-7 px-1.5 text-xs"
                           onClick={() => setChunkTarget(doc)}
-                          title="分块"
                         >
-                          <PlayCircle className="h-4 w-4" />
+                          <PlayCircle className="mr-1 h-3.5 w-3.5" />
+                          分块
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => handleOpenChunkLogs(doc)}
-                          title="分块详情"
-                        >
-                          <FileBarChart className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(doc)}
-                          title="删除"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="icon" variant="ghost" className="h-7 w-7" title="更多">
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleOpenChunkLogs(doc)}>
+                              <FileBarChart className="mr-2 h-4 w-4" />
+                              分块详情
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => setDeleteTarget(doc)}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              删除
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
