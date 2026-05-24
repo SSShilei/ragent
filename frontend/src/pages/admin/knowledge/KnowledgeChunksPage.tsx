@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { RelativeTime } from "@/components/RelativeTime";
 
 import type { KnowledgeChunk, KnowledgeDocument, PageResult } from "@/services/knowledgeService";
 import {
@@ -33,13 +34,6 @@ const truncateText = (value?: string | null, max = 120) => {
   if (!value) return "-";
   if (value.length <= max) return value;
   return `${value.slice(0, max)}...`;
-};
-
-const formatDate = (value?: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN");
 };
 
 const enabledLabel = (enabled?: number | null) => (enabled === 1 ? "启用" : "禁用");
@@ -306,7 +300,7 @@ export function KnowledgeChunksPage() {
                     </TableCell>
                     <TableCell>{chunk.charCount ?? "-"}</TableCell>
                     <TableCell>{chunk.tokenCount ?? "-"}</TableCell>
-                    <TableCell>{formatDate(chunk.updateTime)}</TableCell>
+                    <TableCell><RelativeTime value={chunk.updateTime} /></TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button size="sm" variant="outline" onClick={() => setEditDialog({ open: true, chunk })}>

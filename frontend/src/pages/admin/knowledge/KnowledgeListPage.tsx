@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { RelativeTime } from "@/components/RelativeTime";
 import {
   Table,
   TableBody,
@@ -353,8 +354,8 @@ export function KnowledgeListPage() {
                     <TableCell className="text-muted-foreground">
                       {formatDate(kb.createTime)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(kb.updateTime)}
+                    <TableCell>
+                      <RelativeTime value={kb.updateTime} />
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-2">

@@ -40,6 +40,7 @@ import {
   updateQueryTermMapping
 } from "@/services/queryTermMappingService";
 import { getErrorMessage } from "@/utils/error";
+import { RelativeTime } from "@/components/RelativeTime";
 
 const PAGE_SIZE = 10;
 
@@ -268,8 +269,8 @@ export function QueryTermMappingPage() {
                     <TableCell className="text-muted-foreground">
                       {formatDate(item.createTime)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(item.updateTime)}
+                    <TableCell>
+                      <RelativeTime value={item.updateTime} />
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center gap-2">

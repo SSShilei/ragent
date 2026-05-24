@@ -17,8 +17,8 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { format, differenceInMinutes, differenceInHours, differenceInDays } from "date-fns";
+import { RelativeTime } from "@/components/RelativeTime";
+import { formatFullDateTime } from "@/utils/time";
 
 import type { KnowledgeBase, KnowledgeDocument, KnowledgeDocumentUploadPayload, KnowledgeDocumentChunkLog, PageResult, ChunkStrategyOption } from "@/services/knowledgeService";
 import {
@@ -81,69 +81,6 @@ const statusDotClass = (status?: string | null) => {
   if (normalized === "running") return "bg-amber-500";
   if (normalized === "pending") return "bg-slate-400";
   return "bg-muted-foreground/40";
-};
-
-const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-
-const getWeekStart = (d: Date) => {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = day === 0 ? 6 : day - 1;
-  date.setDate(date.getDate() - diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
-};
-
-const formatRelativeNumeric = (value: string) => {
-  const date = new Date(value);
-  const diffMinutes = differenceInMinutes(new Date(), date);
-  const diffHours = differenceInHours(new Date(), date);
-  const diffDays = differenceInDays(new Date(), date);
-  if (diffMinutes < 1) return "刚刚";
-  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
-  if (diffHours < 24) return `${diffHours} 小时前`;
-  return `${diffDays} 天前`;
-};
-
-const formatRelativeTime = (value?: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const now = new Date();
-  const diffMinutes = differenceInMinutes(now, date);
-  const diffHours = differenceInHours(now, date);
-  if (diffMinutes < 1) return "刚刚";
-  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
-  if (date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
-    return `${diffHours} 小时前`;
-  }
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth() && date.getFullYear() === yesterday.getFullYear()) {
-    return `昨天 ${format(date, "HH:mm")}`;
-  }
-  const weekStart = getWeekStart(now);
-  if (date >= weekStart) {
-    return `${WEEKDAY_NAMES[date.getDay()]} ${format(date, "HH:mm")}`;
-  }
-  if (date.getFullYear() === now.getFullYear()) {
-    return format(date, "M月d日");
-  }
-  return format(date, "yyyy年M月d日");
-};
-
-const formatFullDateTime = (value?: string | null) => {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return format(date, "yyyy-MM-dd HH:mm:ss");
-};
-
-const formatTooltipTime = (value?: string | null) => {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return `${format(date, "yyyy-MM-dd HH:mm:ss")} · ${formatRelativeNumeric(value)}`;
 };
 
 const formatSize = (size?: number | null) => {
@@ -636,37 +573,7 @@ export function KnowledgeDocumentsPage() {
           ) : documents.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">暂无文档</div>
           ) : (
-            <>
-              {selectedIds.size > 0 && (
-                <div className="mb-4 flex items-center gap-2 rounded-md border bg-card px-4 py-2.5 shadow-sm">
-                  <span className="text-sm tabular-nums">
-                    已选择 <span className="font-semibold">{selectedIds.size}</span> 项
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedIds(new Set())}
-                    className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    取消
-                  </button>
-                  <div className="mx-2 h-5 w-px bg-border" />
-                  <Button size="sm" variant="ghost" onClick={handleBatchChunk} disabled={batchOperating}>
-                    <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
-                    批量分块
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => setBatchDeleteOpen(true)}
-                    disabled={batchOperating}
-                  >
-                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                    批量删除
-                  </Button>
-                </div>
-              )}
-              <Table className="min-w-[910px]">
+            <Table className="min-w-[910px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[40px]">
@@ -763,18 +670,7 @@ export function KnowledgeDocumentsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <TooltipProvider delayDuration={300}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="cursor-default truncate text-sm tabular-nums">
-                              {doc.updatedBy || "-"}<span className="text-muted-foreground"> · </span>{formatRelativeTime(doc.updateTime)}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{formatTooltipTime(doc.updateTime)}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                      <RelativeTime value={doc.updateTime} updatedBy={doc.updatedBy} />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
