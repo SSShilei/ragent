@@ -114,11 +114,6 @@ export function QueryTermMappingPage() {
     setForm(emptyForm);
   }, [dialogState]);
 
-  const formatDate = (dateStr?: string | null) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleString("zh-CN");
-  };
-
   const handleSearch = () => {
     setPageNo(1);
     setKeyword(searchKeyword.trim());
@@ -267,7 +262,7 @@ export function QueryTermMappingPage() {
                       {item.remark || "-"}
                     </TableCell>
                     <TableCell>
-                      {formatDate(item.createTime)}
+                      <RelativeTime value={item.createTime} />
                     </TableCell>
                     <TableCell>
                       <RelativeTime value={item.updateTime} />

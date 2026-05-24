@@ -555,7 +555,7 @@ export function IngestionPage() {
                       </TableCell>
                       <TableCell>{task.createdBy || "-"}</TableCell>
                       <TableCell>{task.chunkCount ?? "-"}</TableCell>
-                      <TableCell>{formatDate(task.createTime)}</TableCell>
+                      <TableCell><RelativeTime value={task.createTime} /></TableCell>
                       <TableCell className="text-right">
                         <Button size="sm" variant="outline" onClick={() => setTaskDetail({ open: true, taskId: task.id })}>
                           查看详情

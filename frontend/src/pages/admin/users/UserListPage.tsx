@@ -146,11 +146,6 @@ export function UserListPage() {
     }
   };
 
-  const formatDate = (dateStr?: string | null) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleString("zh-CN");
-  };
-
   const isProtectedAdmin = (user: UserItem) => user.username === "admin";
 
   return (
@@ -222,7 +217,7 @@ export function UserListPage() {
                       <TableCell>
                         <Badge variant={user.role === "admin" ? "default" : "secondary"}>{roleLabel}</Badge>
                       </TableCell>
-                      <TableCell>{formatDate(user.createTime)}</TableCell>
+                      <TableCell><RelativeTime value={user.createTime} /></TableCell>
                       <TableCell><RelativeTime value={user.updateTime} /></TableCell>
                       <TableCell className="text-center">
                         <div className="flex justify-center gap-2">

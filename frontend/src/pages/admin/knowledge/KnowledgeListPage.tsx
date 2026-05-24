@@ -188,11 +188,6 @@ export function KnowledgeListPage() {
     }
   };
 
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleString("zh-CN");
-  };
-
   const formatStatValue = (value: number) => {
     if (statsLoading) return "--";
     return value.toLocaleString("zh-CN");
@@ -352,7 +347,7 @@ export function KnowledgeListPage() {
                     <TableCell>{kb.documentCount ?? "-"}</TableCell>
                     <TableCell>{kb.createdBy || "-"}</TableCell>
                     <TableCell>
-                      {formatDate(kb.createTime)}
+                      <RelativeTime value={kb.createTime} />
                     </TableCell>
                     <TableCell>
                       <RelativeTime value={kb.updateTime} />
