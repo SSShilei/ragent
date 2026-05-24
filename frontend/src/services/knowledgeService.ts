@@ -33,6 +33,7 @@ export interface KnowledgeDocument {
   updatedBy?: string | null;
   createTime?: string | null;
   updateTime?: string | null;
+  chunksEdited?: boolean | null;
 }
 
 export interface KnowledgeChunk {

@@ -525,7 +525,7 @@ export function KnowledgeDocumentsPage() {
           ) : documents.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">暂无文档</div>
           ) : (
-            <Table className="min-w-[850px]">
+            <Table className="min-w-[910px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[280px]">文档</TableHead>
@@ -534,7 +534,7 @@ export function KnowledgeDocumentsPage() {
                   <TableHead className="w-[80px]">分块数</TableHead>
                   <TableHead className="w-[100px]">更新人</TableHead>
                   <TableHead className="w-[160px]">更新时间</TableHead>
-                  <TableHead className="w-[140px] text-left">操作</TableHead>
+                  <TableHead className="w-[200px] text-left">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -544,14 +544,24 @@ export function KnowledgeDocumentsPage() {
                       <div className="flex items-center gap-2.5 min-w-0 max-w-[320px]">
                         {renderFileTypeIcon(doc.fileType, doc.sourceType)}
                         <div className="min-w-0 flex-1">
-                          <button
-                            type="button"
-                            className="admin-link font-medium text-left block truncate max-w-full"
-                            title={doc.docName || ""}
-                            onClick={() => navigate(`/admin/knowledge/${kbId}/docs/${doc.id}`)}
-                          >
-                            {doc.docName || "-"}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              className="admin-link font-medium text-left block truncate min-w-0"
+                              title={doc.docName || ""}
+                              onClick={() => navigate(`/admin/knowledge/${kbId}/docs/${doc.id}`)}
+                            >
+                              {doc.docName || "-"}
+                            </button>
+                            {doc.chunksEdited ? (
+                              <span
+                                className="shrink-0 rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700 ring-1 ring-amber-200"
+                                title="该文档存在被手工编辑过的分块，重新分块会丢失"
+                              >
+                                已编辑
+                              </span>
+                            ) : null}
+                          </div>
                           <div className="mt-0.5 truncate text-xs text-muted-foreground">
                             {[
                               doc.fileType,
@@ -597,12 +607,12 @@ export function KnowledgeDocumentsPage() {
                     <TableCell className="truncate" title={doc.updatedBy || ""}>{doc.updatedBy || "-"}</TableCell>
                     <TableCell>{formatDate(doc.updateTime)}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-0.5">
+                      <div className="flex items-center gap-1">
                         {(doc.fileType === "markdown" || doc.fileType === "pdf") ? (
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-1 text-xs"
+                            className="h-8 gap-1 px-2 text-xs"
                             onClick={() => handlePreview(doc)}
                           >
                             <Eye className="h-3.5 w-3.5" />
@@ -612,7 +622,7 @@ export function KnowledgeDocumentsPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-1 text-xs"
+                          className="h-8 gap-1 px-2 text-xs"
                           onClick={async () => {
                             try {
                               const detail = await getDocument(String(doc.id));
@@ -628,7 +638,7 @@ export function KnowledgeDocumentsPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-1 text-xs"
+                          className="h-8 gap-1 px-2 text-xs"
                           onClick={() => setChunkTarget(doc)}
                         >
                           <PlayCircle className="h-3.5 w-3.5" />
@@ -636,7 +646,7 @@ export function KnowledgeDocumentsPage() {
                         </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" title="更多">
+                            <Button size="icon" variant="ghost" className="h-8 w-8" title="更多">
                               <MoreHorizontal className="h-3.5 w-3.5" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -720,21 +730,32 @@ export function KnowledgeDocumentsPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{chunkTarget?.chunkCount ? "重新分块？" : "开始分块？"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {chunkTarget?.chunkCount ? (
-                <>
-                  文档 [{chunkTarget?.docName}] 已有 {chunkTarget.chunkCount} 个分块记录。
-                  <br />
-                  <span className="font-medium text-amber-600">重新分块会清空原有 Chunk 记录及向量数据。</span>
-                </>
-              ) : (
-                <>文档 [{chunkTarget?.docName}] 将开始分块并写入向量库。</>
-              )}
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                {chunkTarget?.chunkCount ? (
+                  <>
+                    <div>文档 [{chunkTarget?.docName}] 已有 {chunkTarget.chunkCount} 个分块记录。</div>
+                    <div className="font-medium text-amber-600">重新分块会清空原有 Chunk 记录及向量数据。</div>
+                    {chunkTarget?.chunksEdited ? (
+                      <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        <span className="font-semibold">注意：</span>
+                        该文档存在被手工编辑过的分块，重新分块会从源文件重新生成，
+                        <span className="font-semibold">所有手动修改将丢失且无法恢复</span>。
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div>文档 [{chunkTarget?.docName}] 将开始分块并写入向量库。</div>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleChunk}>
+            <AlertDialogAction
+              onClick={handleChunk}
+              className={chunkTarget?.chunksEdited ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : undefined}
+            >
               {chunkTarget?.chunkCount ? "确认" : "开始"}
             </AlertDialogAction>
           </AlertDialogFooter>
