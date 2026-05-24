@@ -85,15 +85,21 @@ const formatDate = (value?: string | null) => {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN");
+  const yy = String(date.getFullYear()).slice(2);
+  const mm = date.getMonth() + 1;
+  const dd = date.getDate();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${yy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
 };
 
 const formatSize = (size?: number | null) => {
   if (!size && size !== 0) return "-";
   if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
-  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (size < 1024 * 1024) return `${parseFloat((size / 1024).toFixed(1))} KB`;
+  if (size < 1024 * 1024 * 1024) return `${parseFloat((size / 1024 / 1024).toFixed(1))} MB`;
+  return `${parseFloat((size / 1024 / 1024 / 1024).toFixed(1))} GB`;
 };
 
 const parseFrontMatter = (content: string): { head: string | null; body: string } => {
@@ -501,7 +507,7 @@ export function KnowledgeDocumentsPage() {
           ) : documents.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">暂无文档</div>
           ) : (
-            <Table className="min-w-[980px]">
+            <Table className="min-w-[950px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[260px]">文档</TableHead>
@@ -509,9 +515,9 @@ export function KnowledgeDocumentsPage() {
                   <TableHead className="w-[110px]">状态</TableHead>
                   <TableHead className="w-[70px]">启用</TableHead>
                   <TableHead className="w-[80px]">分块数</TableHead>
-                  <TableHead className="w-[120px]">类型 · 大小</TableHead>
+                  <TableHead className="w-[130px]">类型 · 大小</TableHead>
                   <TableHead className="w-[160px]">更新时间</TableHead>
-                  <TableHead className="w-[180px] text-left">操作</TableHead>
+                  <TableHead className="w-[140px] text-left">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -568,7 +574,7 @@ export function KnowledgeDocumentsPage() {
                     </TableCell>
                     <TableCell>{doc.chunkCount ?? "-"}</TableCell>
                     <TableCell>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
                         {doc.fileType || "-"}{doc.fileSize ? ` · ${formatSize(doc.fileSize)}` : ""}
                       </span>
                     </TableCell>
@@ -579,17 +585,17 @@ export function KnowledgeDocumentsPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-1.5 text-xs"
+                            className="h-7 px-1 text-xs"
                             onClick={() => handlePreview(doc)}
                           >
-                            <Eye className="mr-1 h-3.5 w-3.5" />
+                            <Eye className="h-3.5 w-3.5" />
                             预览
                           </Button>
                         ) : null}
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-1.5 text-xs"
+                          className="h-7 px-1 text-xs"
                           onClick={async () => {
                             try {
                               const detail = await getDocument(String(doc.id));
@@ -599,16 +605,16 @@ export function KnowledgeDocumentsPage() {
                             }
                           }}
                         >
-                          <Pencil className="mr-1 h-3.5 w-3.5" />
+                          <Pencil className="h-3.5 w-3.5" />
                           编辑
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-1.5 text-xs"
+                          className="h-7 px-1 text-xs"
                           onClick={() => setChunkTarget(doc)}
                         >
-                          <PlayCircle className="mr-1 h-3.5 w-3.5" />
+                          <PlayCircle className="h-3.5 w-3.5" />
                           分块
                         </Button>
                         <DropdownMenu>

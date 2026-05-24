@@ -22,6 +22,7 @@ import {
   toggleChunk,
   getChunksPage,
   getDocument,
+  getKnowledgeBase,
   updateChunk
 } from "@/services/knowledgeService";
 import { getErrorMessage } from "@/utils/error";
@@ -47,6 +48,7 @@ export function KnowledgeChunksPage() {
   const { kbId, docId } = useParams();
   const navigate = useNavigate();
   const [doc, setDoc] = useState<KnowledgeDocument | null>(null);
+  const [kbName, setKbName] = useState("");
   const [pageData, setPageData] = useState<PageResult<KnowledgeChunk> | null>(null);
   const [pageNo, setPageNo] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -94,6 +96,12 @@ export function KnowledgeChunksPage() {
   useEffect(() => {
     loadDocument();
   }, [docId]);
+
+  useEffect(() => {
+    if (kbId) {
+      getKnowledgeBase(kbId).then(kb => setKbName(kb.name)).catch(() => {});
+    }
+  }, [kbId]);
 
   useEffect(() => {
     loadChunks();
@@ -183,7 +191,7 @@ export function KnowledgeChunksPage() {
         <div>
           <h1 className="admin-page-title">分块管理</h1>
           <p className="admin-page-subtitle">
-            {doc?.docName || docId} {kbId ? `（知识库: ${kbId}）` : ""}
+            {doc?.docName || docId} {kbName ? `（知识库: ${kbName}）` : ""}
           </p>
         </div>
         <div className="admin-page-actions">
