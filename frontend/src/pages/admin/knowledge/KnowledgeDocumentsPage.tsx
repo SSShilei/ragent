@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Check, FileUp, FolderOpen, PlayCircle, RefreshCw, Trash2, Pencil, FileBarChart, X, Eye, MoreHorizontal } from "lucide-react";
+import { Check, FileUp, PlayCircle, RefreshCw, Trash2, Pencil, FileBarChart, X, Eye, MoreHorizontal, FileText, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -124,6 +124,20 @@ const formatChunkStrategy = (strategy?: string | null) => {
   if (normalized === "fixed_size") return "固定大小";
   if (normalized === "structure_aware") return "语义感知（Markdown友好）";
   return strategy || "-";
+};
+
+const renderFileTypeIcon = (fileType?: string | null, sourceType?: string | null) => {
+  const type = fileType?.toLowerCase();
+  if (type === "pdf") {
+    return <FileText className="h-4 w-4 shrink-0 text-red-500" />;
+  }
+  if (type === "markdown" || type === "md") {
+    return <FileText className="h-4 w-4 shrink-0 text-blue-500" />;
+  }
+  if (sourceType?.toLowerCase() === "url") {
+    return <LinkIcon className="h-4 w-4 shrink-0 text-purple-500" />;
+  }
+  return <FileText className="h-4 w-4 shrink-0 text-slate-400" />;
 };
 
 export function KnowledgeDocumentsPage() {
@@ -511,15 +525,13 @@ export function KnowledgeDocumentsPage() {
           ) : documents.length === 0 ? (
             <div className="py-8 text-center text-muted-foreground">暂无文档</div>
           ) : (
-            <Table className="min-w-[950px]">
+            <Table className="min-w-[750px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[260px]">文档</TableHead>
-                  <TableHead className="w-[130px]">来源 · 模式</TableHead>
+                  <TableHead className="w-[280px]">文档</TableHead>
                   <TableHead className="w-[110px]">状态</TableHead>
                   <TableHead className="w-[70px]">启用</TableHead>
                   <TableHead className="w-[80px]">分块数</TableHead>
-                  <TableHead className="w-[130px]">类型 · 大小</TableHead>
                   <TableHead className="w-[160px]">更新时间</TableHead>
                   <TableHead className="w-[140px] text-left">操作</TableHead>
                 </TableRow>
@@ -527,23 +539,27 @@ export function KnowledgeDocumentsPage() {
               <TableBody>
                 {documents.map((doc) => (
                   <TableRow key={doc.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex min-w-0 max-w-[280px] items-center gap-2">
-                        <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                        <button
-                          type="button"
-                          className="admin-link flex-1 min-w-0 text-left"
-                          title={doc.docName || ""}
-                          onClick={() => navigate(`/admin/knowledge/${kbId}/docs/${doc.id}`)}
-                        >
-                          <span className="flex-1 min-w-0 truncate">{doc.docName || "-"}</span>
-                        </button>
-                      </div>
-                    </TableCell>
                     <TableCell>
-                      <span className="text-xs text-muted-foreground">
-                        {formatSourceLabel(doc.sourceType)}{doc.processMode ? ` · ${doc.processMode}` : ""}
-                      </span>
+                      <div className="flex items-center gap-2.5 min-w-0 max-w-[320px]">
+                        {renderFileTypeIcon(doc.fileType, doc.sourceType)}
+                        <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            className="admin-link font-medium text-left block truncate max-w-full"
+                            title={doc.docName || ""}
+                            onClick={() => navigate(`/admin/knowledge/${kbId}/docs/${doc.id}`)}
+                          >
+                            {doc.docName || "-"}
+                          </button>
+                          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {[
+                              doc.fileType,
+                              doc.fileSize ? formatSize(doc.fileSize) : null,
+                              doc.sourceType ? formatSourceLabel(doc.sourceType) : null,
+                            ].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
@@ -577,11 +593,6 @@ export function KnowledgeDocumentsPage() {
                       })()}
                     </TableCell>
                     <TableCell>{doc.chunkCount ?? "-"}</TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {doc.fileType || "-"}{doc.fileSize ? ` · ${formatSize(doc.fileSize)}` : ""}
-                      </span>
-                    </TableCell>
                     <TableCell>{formatDate(doc.updateTime)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-0.5">
