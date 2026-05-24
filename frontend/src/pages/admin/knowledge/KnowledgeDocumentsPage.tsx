@@ -366,6 +366,10 @@ export function KnowledgeDocumentsPage() {
 
   const handlePreview = async (doc: KnowledgeDocument) => {
     setPreviewTarget(doc);
+    if (doc.fileType === "pdf") {
+      setPreviewContent("");
+      return;
+    }
     setPreviewContent("");
     setPreviewLoading(true);
     try {
@@ -581,7 +585,7 @@ export function KnowledgeDocumentsPage() {
                     <TableCell>{formatDate(doc.updateTime)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-0.5">
-                        {doc.fileType === "markdown" ? (
+                        {(doc.fileType === "markdown" || doc.fileType === "pdf") ? (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -904,7 +908,11 @@ export function KnowledgeDocumentsPage() {
       </Dialog>
 
       <Dialog open={Boolean(previewTarget)} onOpenChange={(open) => (!open ? setPreviewTarget(null) : null)}>
-        <DialogContent hideClose className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-[900px] p-0" onOpenAutoFocus={(e) => e.preventDefault()} onCloseAutoFocus={(e) => { e.preventDefault(); requestAnimationFrame(() => (document.activeElement as HTMLElement)?.blur()); }}>
+        <DialogContent hideClose className={
+          previewTarget?.fileType === "pdf"
+            ? "flex h-[92vh] flex-col overflow-hidden sm:max-w-[1100px] p-0"
+            : "flex max-h-[90vh] flex-col overflow-hidden sm:max-w-[900px] p-0"
+        } onOpenAutoFocus={(e) => e.preventDefault()} onCloseAutoFocus={(e) => { e.preventDefault(); requestAnimationFrame(() => (document.activeElement as HTMLElement)?.blur()); }}>
           <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-card px-6 py-3">
             <span className="text-sm font-medium text-muted-foreground truncate">{previewTarget?.docName || "预览"}</span>
             <DialogClose className="rounded-md p-1.5 opacity-50 transition-all hover:opacity-100 hover:bg-muted focus-visible:outline-none">
@@ -913,6 +921,12 @@ export function KnowledgeDocumentsPage() {
           </div>
           {previewLoading ? (
             <div className="py-8 text-center text-muted-foreground">加载中...</div>
+          ) : previewTarget?.fileType === "pdf" ? (
+            <iframe
+              className="flex-1 w-full border-0"
+              src={`${import.meta.env.VITE_API_BASE_URL || ""}/knowledge-base/docs/${previewTarget.id}/file`}
+              title={previewTarget.docName || ""}
+            />
           ) : previewContent ? (
             (() => {
               const { head, body } = parseFrontMatter(previewContent);
