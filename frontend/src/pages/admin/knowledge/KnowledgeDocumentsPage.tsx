@@ -544,10 +544,10 @@ export function KnowledgeDocumentsPage() {
                       <div className="flex items-center gap-2.5 min-w-0 max-w-[320px]">
                         {renderFileTypeIcon(doc.fileType, doc.sourceType)}
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
                             <button
                               type="button"
-                              className="admin-link font-medium text-left block truncate min-w-0"
+                              className="block truncate min-w-0 text-left font-medium text-indigo-600 transition-colors hover:text-indigo-700 hover:underline underline-offset-4"
                               title={doc.docName || ""}
                               onClick={() => navigate(`/admin/knowledge/${kbId}/docs/${doc.id}`)}
                             >
