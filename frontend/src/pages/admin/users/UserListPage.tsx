@@ -219,8 +219,8 @@ export function UserListPage() {
                       </TableCell>
                       <TableCell><RelativeTime value={user.createTime} /></TableCell>
                       <TableCell><RelativeTime value={user.updateTime} /></TableCell>
-                      <TableCell className="text-center">
-                        <div className="flex justify-center gap-2">
+                      <TableCell>
+                        <div className="flex gap-2">
                           <Button
                             variant="outline"
                             size="sm"
