@@ -4,6 +4,8 @@
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import { Check, Copy, ImageIcon } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -22,6 +24,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw, rehypeSanitize]}
       components={{
         code({ inline, className, children, node, ...props }) {
           const match = /language-(\w+)/.exec(className || "");
@@ -111,7 +114,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         table({ children, ...props }) {
           return (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-[#d0d7de] rounded-md dark:border-[#30363d]" {...props}>
+              <table className="w-auto min-w-full border-collapse border border-[#d0d7de] rounded-md dark:border-[#30363d]" {...props}>
                 {children}
               </table>
             </div>
@@ -126,14 +129,14 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         },
         th({ children, ...props }) {
           return (
-            <th className="border-b border-[#d0d7de] border-r border-r-[#d0d7de] px-3 py-2 text-left text-sm font-semibold text-[#24292f] last:border-r-0 dark:border-[#30363d] dark:border-r-[#30363d] dark:text-[#c9d1d9]" {...props}>
+            <th className="border-b border-[#d0d7de] border-r border-r-[#d0d7de] px-3 py-2 text-left text-sm font-semibold text-[#24292f] last:border-r-0 whitespace-nowrap dark:border-[#30363d] dark:border-r-[#30363d] dark:text-[#c9d1d9]" {...props}>
               {children}
             </th>
           );
         },
         td({ children, ...props }) {
           return (
-            <td className="border-b border-[#d0d7de] border-r border-r-[#d0d7de] px-3 py-2.5 text-sm text-[#24292f] last:border-r-0 dark:border-[#30363d] dark:border-r-[#30363d] dark:text-[#c9d1d9]" {...props}>
+            <td className="border-b border-[#d0d7de] border-r border-r-[#d0d7de] px-3 py-2.5 text-sm text-[#24292f] last:border-r-0 align-top max-w-md dark:border-[#30363d] dark:border-r-[#30363d] dark:text-[#c9d1d9]" {...props}>
               {children}
             </td>
           );
