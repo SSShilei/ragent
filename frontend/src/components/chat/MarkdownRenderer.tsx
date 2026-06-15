@@ -148,9 +148,9 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         },
         table({ children, ...props }) {
           return (
-            <div className="my-6 overflow-x-auto">
+            <div className="my-6 w-full min-w-0 overflow-x-auto">
               <table
-                className="w-auto min-w-full border-separate border-spacing-0 overflow-hidden rounded-lg border border-[#d0d7de] text-sm dark:border-[#30363d] [&_tr:last-child>td]:border-b-0"
+                className="w-full border-separate border-spacing-0 overflow-hidden rounded-lg border border-[#d0d7de] text-sm dark:border-[#30363d] [&_tr:last-child>td]:border-b-0"
                 {...props}
               >
                 {children}
@@ -160,7 +160,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         },
         thead({ children, ...props }) {
           return (
-            <thead className="bg-[#f6f8fa] dark:bg-[#161b22]" {...props}>
+            <thead className="bg-[#eaeef2] dark:bg-[#21262d]" {...props}>
               {children}
             </thead>
           );
@@ -178,7 +178,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         th({ children, ...props }) {
           return (
             <th
-              className="border-b border-r border-[#d0d7de] px-3 py-2 text-left text-sm font-semibold text-[#24292f] whitespace-nowrap last:border-r-0 dark:border-[#30363d] dark:text-[#c9d1d9]"
+              className="border-b border-r border-[#d0d7de] px-2 py-2 text-left text-sm font-semibold text-[#24292f] align-middle break-words last:border-r-0 dark:border-[#30363d] dark:text-[#c9d1d9]"
               {...props}
             >
               {children}
@@ -188,7 +188,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         td({ children, ...props }) {
           return (
             <td
-              className="max-w-md border-b border-r border-[#d0d7de] px-3 py-2 text-sm text-[#24292f] align-top last:border-r-0 dark:border-[#30363d] dark:text-[#c9d1d9]"
+              className="border-b border-r border-[#d0d7de] px-2 py-2 text-sm text-[#24292f] align-middle break-words last:border-r-0 dark:border-[#30363d] dark:text-[#c9d1d9]"
               {...props}
             >
               {children}
@@ -198,7 +198,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         blockquote({ children, ...props }) {
           return (
             <blockquote
-              className="my-5 rounded-r-md border-l-4 border-[#0969da] bg-[#f6f8fa] px-6 py-4 italic text-[#24292f] dark:border-[#58a6ff] dark:bg-[#161b22] dark:text-[#c9d1d9]"
+              className="my-5 rounded-r-md border-l-4 border-[#0969da] bg-[#f6f8fa] px-6 py-4 italic text-[#24292f] dark:border-[#58a6ff] dark:bg-[#161b22] dark:text-[#c9d1d9] [&_p:first-of-type]:before:content-none [&_p:last-of-type]:after:content-none"
               {...props}
             >
               {children}

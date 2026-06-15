@@ -117,7 +117,7 @@
 
   /* ===== 新设计系统 - 布局 ===== */
   --sidebar-width: 280px;
-  --content-max-width: 800px;
+  --content-max-width: 840px;
   --header-height: 60px;
 
   /* ===== 旧变量保留（兼容性）===== */
@@ -167,22 +167,53 @@ select:focus:not(:focus-visible),
   min-height: 100vh;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+html {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 999px;
-}
-
-::-webkit-scrollbar-track {
+html *::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+html *::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  transition: background-color 0.25s ease;
+}
+
+html *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html.is-scrolling {
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+
+html.is-scrolling *::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+html *::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+html.dark.is-scrolling {
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+
+html.dark.is-scrolling *::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+html.dark *::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 .text-gradient {
@@ -1529,6 +1560,16 @@ select:focus:not(:focus-visible),
   .admin-layout .trace-list-action-btn:hover {
     background: #eef2ff;
     color: #3730a3;
+  }
+
+  .admin-layout .trace-list-action-btn-primary {
+    border-color: #c7d2fe;
+    background: #ffffff;
+  }
+
+  .admin-layout .trace-list-action-btn-primary:hover {
+    border-color: #818cf8;
+    background: #eef2ff;
   }
 
   .admin-layout .trace-list-table-empty {

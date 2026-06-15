@@ -416,8 +416,8 @@ export function RunsTable({
                       <div className="trace-list-action-group">
                         <Button
                           size="sm"
-                          variant="ghost"
-                          className="trace-list-action-btn"
+                          variant="outline"
+                          className="trace-list-action-btn trace-list-action-btn-primary"
                           onClick={() => setBriefRun(run)}
                         >
                           <LayoutPanelTop className="h-3.5 w-3.5" />
