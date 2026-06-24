@@ -15,40 +15,18 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
-
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+package com.nageoffer.ai.ragent.core.parser.model;
 
 /**
- * 文档解析器类型枚举
+ * 资产引用：指向 RustFS 中已上传的二进制资源（图片等）
+ * <p>
+ * 由 MinerUResultUnpacker / Excel 等解析器在上传资产后构造，
+ * 挂在 ImageBlock 上，并最终回填到 VectorChunk.assets 供检索使用
+ *
+ * @param publicUrl     浏览器可直连的公开预览 URL，如 "<a href="http://localhost:9000/ragent-assets/xxx.png">...</a>"
+ *                      （asset-bucket 已开公共读；对应 s3://bucket/key 定位符可由该 URL 反解）
+ * @param mime          MIME 类型，如 "image/png"
+ * @param sourceBlockId 关联的 Block.id()，用于溯源
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
-
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
-
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+public record AssetRef(String publicUrl, String mime, String sourceBlockId) {
 }

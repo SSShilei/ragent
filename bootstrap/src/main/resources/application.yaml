@@ -200,6 +200,21 @@ rustfs:
   url: http://localhost:9000
   access-key-id: rustfsadmin
   secret-access-key: rustfsadmin
+  # 多模态解析产物 bucket（PDF 抽出来的图片、未来 PNG 原图等）
+  # 与用户上传的原始文档 bucket 隔离
+  asset-bucket: ragent-assets
+
+# MinerU SaaS API 配置（PDF / Word / PPT 走 MinerU 解析）
+mineru:
+  api-url: https://mineru.net/api/v4
+  api-key: ${MINERU_API_KEY:}
+  poll-interval-seconds: 5
+  timeout-seconds: 300
+  enable-table: true
+  enable-formula: true
+  ocr: false
+  language: ch
+  concurrency-limit: 5
 
 sa-token:
   token-name: Authorization

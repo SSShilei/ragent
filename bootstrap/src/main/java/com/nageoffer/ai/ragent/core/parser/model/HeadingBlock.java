@@ -15,40 +15,21 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
+package com.nageoffer.ai.ragent.core.parser.model;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import java.util.List;
 
 /**
- * 文档解析器类型枚举
+ * 标题 Block：在 ChunkerNode 中由 HeadingHandler 消费，不直接产 chunk，而是累积到后续 chunk 的 outlinePath
+ *
+ * @param level markdown 标题级别，1-6
+ * @param text  标题文本
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
-
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
-
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+public record HeadingBlock(
+        String id,
+        Provenance provenance,
+        List<String> outlinePath,
+        int level,
+        String text
+) implements Block {
 }

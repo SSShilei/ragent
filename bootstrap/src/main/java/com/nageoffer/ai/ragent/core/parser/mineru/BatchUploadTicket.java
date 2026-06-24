@@ -15,40 +15,19 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
-
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+package com.nageoffer.ai.ragent.core.parser.mineru;
 
 /**
- * 文档解析器类型枚举
+ * MinerU 申请上传链接接口的返回凭证(单文件)
+ * <p>
+ * {@link MinerUClient#requestUpload} 返回:batchId 用于后续轮询,
+ * uploadUrl 是 MinerU OSS 的预签名 PUT 链接(24h 有效),把文件字节直接 PUT 上去即可
+ *
+ * @param batchId   MinerU 分配的 batch_id,轮询/下载凭据
+ * @param uploadUrl 文件上传目标 URL,PUT 原始字节,无须鉴权头
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
-
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
-
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+public record BatchUploadTicket(
+        String batchId,
+        String uploadUrl
+) {
 }

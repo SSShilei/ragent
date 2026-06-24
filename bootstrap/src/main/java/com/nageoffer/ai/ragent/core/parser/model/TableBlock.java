@@ -15,40 +15,26 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
+package com.nageoffer.ai.ragent.core.parser.model;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import java.util.List;
 
 /**
- * 文档解析器类型枚举
+ * 表格 Block：由 TableChunker 按 rowsPerChunk 切分，每个 chunk 都包含 headers。
+ * <p>
+ * 合并单元格已在 Excel 解析器（ExcelTableNormalizer）展开填充；
+ * 多行表头已展平为单行，列名以分隔符拼接（如 "财务|收入"）
+ *
+ * @param headers     列名列表（已展平）
+ * @param rows        数据行（合并单元格已展开）
+ * @param captionText 表格标题（若有）
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
-
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
-
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+public record TableBlock(
+        String id,
+        Provenance provenance,
+        List<String> outlinePath,
+        List<String> headers,
+        List<List<String>> rows,
+        String captionText
+) implements Block {
 }

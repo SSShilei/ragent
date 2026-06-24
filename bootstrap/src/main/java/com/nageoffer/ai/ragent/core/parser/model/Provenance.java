@@ -15,40 +15,29 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
-
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+package com.nageoffer.ai.ragent.core.parser.model;
 
 /**
- * 文档解析器类型枚举
+ * Block 来源信息(溯源用)
+ * <p>
+ * 用于检索时拼接 sectionContext、排障时定位原始文档位置
+ *
+ * @param sourceFile 原始文件标识(文件 ID 或文件名)
+ * @param sheetName  Excel sheet 名,非 Excel 来源为 null
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
+public record Provenance(String sourceFile, String sheetName) {
 
     /**
-     * Tika 解析器（用于 Text 等基础格式）
+     * 仅含文件来源的最小构造
      */
-    TIKA("Tika"),
+    public static Provenance ofFile(String sourceFile) {
+        return new Provenance(sourceFile, null);
+    }
 
     /**
-     * Markdown 解析器
+     * Excel 来源构造
      */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+    public static Provenance ofExcelCell(String sourceFile, String sheetName) {
+        return new Provenance(sourceFile, sheetName);
+    }
 }

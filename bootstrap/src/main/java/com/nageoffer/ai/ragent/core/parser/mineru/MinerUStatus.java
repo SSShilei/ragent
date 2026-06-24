@@ -15,40 +15,26 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
-
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+package com.nageoffer.ai.ragent.core.parser.mineru;
 
 /**
- * 文档解析器类型枚举
+ * MinerU 任务状态快照
+ *
+ * @param state        当前状态
+ * @param zipUrl       结果 zip 下载 URL,仅 {@link MinerUTaskState#DONE} 时非空
+ * @param errorMessage 失败原因,仅 {@link MinerUTaskState#FAILED} 时非空
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
+public record MinerUStatus(
+        MinerUTaskState state,
+        String zipUrl,
+        String errorMessage
+) {
 
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
+    public boolean completed() {
+        return state == MinerUTaskState.DONE;
+    }
 
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+    public boolean failed() {
+        return state == MinerUTaskState.FAILED;
+    }
 }

@@ -15,40 +15,21 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
+package com.nageoffer.ai.ragent.core.parser.model;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import java.util.List;
 
 /**
- * 文档解析器类型枚举
+ * 代码块 Block：由 CodeChunker 产生 atomic chunk（代码切碎危害大，永不切）
+ *
+ * @param language 编程语言标识（如 "java"、"bash"），可空
+ * @param code     代码内容
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
-
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
-
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+public record CodeBlock(
+        String id,
+        Provenance provenance,
+        List<String> outlinePath,
+        String language,
+        String code
+) implements Block {
 }

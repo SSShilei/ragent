@@ -15,40 +15,21 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
+package com.nageoffer.ai.ragent.core.parser.model;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import java.util.List;
 
 /**
- * 文档解析器类型枚举
+ * 列表 Block：由 ListChunker 处理。短列表 atomic，长列表按项分组
+ *
+ * @param ordered 是否有序列表
+ * @param items   列表项内容
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
-
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
-
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+public record ListBlock(
+        String id,
+        Provenance provenance,
+        List<String> outlinePath,
+        boolean ordered,
+        List<String> items
+) implements Block {
 }

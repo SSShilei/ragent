@@ -15,40 +15,25 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.core.parser;
+package com.nageoffer.ai.ragent.core.parser.model;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import java.util.List;
 
 /**
- * 文档解析器类型枚举
+ * 图片 Block:由 ImageChunker 产生 atomic chunk,渲染为 ![caption](http://...)
+ * <p>
+ * 必须 atomic 保护,避免 chunker 切碎 markdown 图片链接导致前端渲染失败
+ *
+ * @param asset    图片资产引用(指向 RustFS)
+ * @param caption  图片标题(如 "图3-1:系统架构图")
+ * @param altText  无障碍替代文本
  */
-@Getter
-@RequiredArgsConstructor
-public enum ParserType {
-
-    /**
-     * Tika 解析器（用于 Text 等基础格式）
-     */
-    TIKA("Tika"),
-
-    /**
-     * Markdown 解析器
-     */
-    MARKDOWN("Markdown"),
-
-    /**
-     * Apache POI Excel 解析器（合并单元格 / 多行表头 / 超链接）
-     */
-    EXCEL_POI("ExcelPoi"),
-
-    /**
-     * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
-     */
-    MINERU("MinerU");
-
-    /**
-     * 解析器类型名称
-     */
-    private final String type;
+public record ImageBlock(
+        String id,
+        Provenance provenance,
+        List<String> outlinePath,
+        AssetRef asset,
+        String caption,
+        String altText
+) implements Block {
 }

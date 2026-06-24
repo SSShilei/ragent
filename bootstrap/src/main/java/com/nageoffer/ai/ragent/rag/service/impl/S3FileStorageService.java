@@ -21,14 +21,17 @@ import cn.hutool.core.lang.Assert;
 import com.nageoffer.ai.ragent.rag.dto.StoredFileDTO;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import com.nageoffer.ai.ragent.rag.util.FileTypeDetector;
-import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import org.apache.tika.Tika;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 
@@ -43,11 +46,24 @@ import java.time.Duration;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class S3FileStorageService implements FileStorageService {
 
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
+
+    /**
+     * 浏览器可直连的对象存储基址,默认回退内部 {@code rustfs.url}
+     * <p>
+     * 生产环境若内外网端点不同,配置 {@code rustfs.public-url} 覆盖即可,无需改代码
+     */
+    private final String publicBaseUrl;
+
+    public S3FileStorageService(S3Client s3Client, S3Presigner s3Presigner,
+                                @Value("${rustfs.public-url:${rustfs.url}}") String publicBaseUrl) {
+        this.s3Client = s3Client;
+        this.s3Presigner = s3Presigner;
+        this.publicBaseUrl = publicBaseUrl;
+    }
 
     private static final Tika TIKA = new Tika();
     private static final Duration PRESIGN_DURATION = Duration.ofMinutes(10);
@@ -106,6 +122,54 @@ public class S3FileStorageService implements FileStorageService {
     public void deleteByUrl(String url) {
         S3Location loc = parseS3Url(url);
         s3Client.deleteObject(b -> b.bucket(loc.bucket()).key(loc.key()));
+    }
+
+    @Override
+    public boolean bucketExists(String bucket) {
+        validateBucketName(bucket);
+        try {
+            s3Client.headBucket(b -> b.bucket(bucket));
+            return true;
+        } catch (NoSuchBucketException e) {
+            return false;
+        } catch (S3Exception e) {
+            // RustFS/S3 对不存在的 bucket 可能返回 404 而非 NoSuchBucketException
+            if (e.statusCode() == 404) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public void createBucket(String bucket) {
+        validateBucketName(bucket);
+        try {
+            s3Client.createBucket(b -> b.bucket(bucket));
+        } catch (BucketAlreadyOwnedByYouException e) {
+            // 幂等：已拥有视为成功
+        }
+    }
+
+    @Override
+    public String getPublicUrl(String url) {
+        Assert.notBlank(url, "Url 不能为空");
+        S3Location loc = parseS3Url(url);
+        String base = publicBaseUrl.endsWith("/")
+                ? publicBaseUrl.substring(0, publicBaseUrl.length() - 1)
+                : publicBaseUrl;
+        return base + "/" + loc.bucket() + "/" + loc.key();
+    }
+
+    @Override
+    public void setBucketPublicReadOnly(String bucket) {
+        validateBucketName(bucket);
+        // 匿名只读策略：允许任意 Principal GetObject,使桶内对象可被浏览器直连预览
+        String policy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow",\
+                "Principal":{"AWS":["*"]},"Action":["s3:GetObject"],\
+                "Resource":["arn:aws:s3:::%s/*"]}]}""".formatted(bucket);
+        s3Client.putBucketPolicy(b -> b.bucket(bucket).policy(policy));
     }
 
     /**
