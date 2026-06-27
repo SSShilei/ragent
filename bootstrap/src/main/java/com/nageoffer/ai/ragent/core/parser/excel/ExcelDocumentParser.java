@@ -127,29 +127,26 @@ public class ExcelDocumentParser implements DocumentParser {
     }
 
     /**
-     * 用 {@link ExcelTableNormalizer} 规范化 sheet，按空行切分为多个 TableBlock
+     * 用 {@link ExcelTableNormalizer} 规范化 sheet 为单张表，产出 0 或 1 个 TableBlock
      */
     private List<TableBlock> buildTableBlocks(Sheet sheet, String sourceFile, int headerRows,
                                               DataFormatter formatter, FormulaEvaluator evaluator) {
-        List<NormalizedTable> tables = ExcelTableNormalizer.normalize(sheet, formatter, evaluator, headerRows);
-        if (tables.isEmpty()) {
+        NormalizedTable table = ExcelTableNormalizer.normalize(sheet, formatter, evaluator, headerRows);
+        if (table.isEmpty()) {
             log.debug("Sheet [{}] 为空，跳过", sheet.getSheetName());
             return List.of();
         }
 
         Provenance prov = Provenance.ofExcelCell(sourceFile, sheet.getSheetName());
-        List<TableBlock> blocks = new ArrayList<>();
-        for (NormalizedTable t : tables) {
-            blocks.add(new TableBlock(
-                    UUID.randomUUID().toString(),
-                    prov,
-                    List.of(),
-                    t.headers(),
-                    t.rows(),
-                    t.caption().isEmpty() ? null : t.caption()
-            ));
-        }
-        return blocks;
+        TableBlock block = new TableBlock(
+                UUID.randomUUID().toString(),
+                prov,
+                List.of(),
+                table.headers(),
+                table.rows(),
+                null
+        );
+        return List.of(block);
     }
 
     private static String extractString(Map<String, Object> options) {

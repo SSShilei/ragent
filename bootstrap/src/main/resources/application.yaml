@@ -105,6 +105,18 @@ rag:
     enabled: true
     max-error-length: 1000
 
+  # 图片解析（图生文）配置
+  # 产出一段自包含的知识文本：既说清"图是什么"，又完整保留所有文字与层级
+  image-parse:
+    description-prompt: |-
+      请把这张图片的内容转写成一段自包含的知识文本，用于知识库检索与问答，不要描述颜色、布局、字体等视觉样式。要求：
+      1. 开头用一两句话说明这张图是什么（主题、类型、用途），让人不看图也能明白讲的是什么。
+      2. 随后按图中的分组、层级、流程关系，完整转写所有文字内容（OCR），保留每个分组标题与其下属条目的归属关系，不要遗漏任何文字。
+      3. 若是图表、架构图或流程图，请补充说明各部分之间的关系（如包含、调用、先后顺序），而不只是罗列文字。
+      4. 保持术语准确完整，表述贴近用户可能的提问方式。
+      5. 最后另起一行，用一句话自然引出图片（例如"下方为该内容对应的原始图片："），以便在这段文字后紧接着展示图片。
+    max-output-tokens: 4096
+
 ai:
   providers:
     ollama:
@@ -195,6 +207,13 @@ ai:
         provider: noop
         model: noop
         priority: 100
+
+  vlm:
+    default-model: qwen-vl-max
+    candidates:
+      - id: qwen-vl-max
+        provider: bailian
+        model: qwen-vl-max
 
 rustfs:
   url: http://localhost:9000

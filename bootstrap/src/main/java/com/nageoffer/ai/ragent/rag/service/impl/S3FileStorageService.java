@@ -322,6 +322,7 @@ public class S3FileStorageService implements FileStorageService {
         return StoredFileDTO.builder()
                 .url(url)
                 .detectedType(detectedType)
+                .mimeType(contentType)
                 .size(size)
                 .originalFilename(originalFilename)
                 .build();

@@ -45,10 +45,22 @@ public class ImageChunker implements BlockChunker<ImageBlock> {
         String visible = pickCaption(block);
         String markdown = "![" + visible + "](" + asset.publicUrl() + ")";
 
+        // content(展示+答题):自包含描述在前 + 图片 markdown 在后;无描述(如 MinerU 抽图)回落为纯链接
+        String description = block.description();
+        boolean hasDescription = description != null && !description.isBlank();
+        String content = hasDescription
+                ? description.strip() + "\n\n" + markdown
+                : markdown;
+
+        // embeddingText(只做向量):用描述原文,去掉 ![](url) 那行 URL 噪声;
+        // 无描述则置 null,由 ChunkEmbeddingService 回退 content(MinerU 老行为不变)
+        String embeddingText = hasDescription ? description.strip() : null;
+
         VectorChunk chunk = VectorChunk.builder()
                 .chunkId(IdUtil.getSnowflakeNextIdStr())
                 .index(ctx.startIndex())
-                .content(markdown)
+                .content(content)
+                .embeddingText(embeddingText)
                 .blockType("IMAGE")
                 .outlinePath(new ArrayList<>(ctx.outlinePath()))
                 .sourceBlockIds(List.of(block.id()))

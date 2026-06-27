@@ -37,6 +37,7 @@ import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
 import com.nageoffer.ai.ragent.core.parser.BlockTextRenderer;
 import com.nageoffer.ai.ragent.core.parser.DocumentParser;
 import com.nageoffer.ai.ragent.core.parser.DocumentParserSelector;
+import com.nageoffer.ai.ragent.core.parser.ParserType;
 import com.nageoffer.ai.ragent.core.parser.model.ParsedDocument;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
@@ -133,6 +134,11 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         SourceType sourceType = SourceType.normalize(requestParam.getSourceType());
         validateSourceAndSchedule(sourceType, requestParam);
         StoredFileDTO stored = resolveStoredFile(kbDO.getCollectionName(), sourceType, requestParam.getSourceLocation(), file);
+        // 前置拦截：与分块阶段同一套 MIME 路由，无解析器的类型直接拒绝，不落库不发 MQ
+        if (parserSelector.selectByMimeType(stored.getMimeType()) == null) {
+            fileStorageService.deleteByUrl(stored.getUrl());
+            throw new ClientException("暂不支持的文件类型：" + stored.getDetectedType());
+        }
         ProcessModeConfig modeConfig = resolveProcessModeConfig(requestParam);
 
         KnowledgeDocumentDO documentDO = KnowledgeDocumentDO.builder()
@@ -306,7 +312,10 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         ChunkingMode chunkingMode = ChunkingMode.fromValue(documentDO.getChunkStrategy());
         KnowledgeBaseDO kbDO = knowledgeBaseMapper.selectById(documentDO.getKbId());
         String embeddingModel = kbDO.getEmbeddingModel();
-        ChunkingOptions config = buildChunkingOptions(chunkingMode, documentDO);
+        Map<String, Object> rawConfig = parseChunkConfig(documentDO.getChunkConfig());
+        ChunkingOptions config = chunkingMode.createOptions(rawConfig);
+        // 表格 block-aware 行上限（自由键，缺省走 TableChunker 默认）
+        Integer rowsPerChunk = readInt(rawConfig);
 
         long extractStart = System.currentTimeMillis();
 
@@ -333,6 +342,14 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             if (parser == null) {
                 throw new RuntimeException("未找到 MIME [" + mimeType + "] 对应的解析器,docId=" + documentDO.getId());
             }
+            // Excel 默认命中 POI 简单 key-val；用户在配置里选了 mineru 则切到 MinerU 复杂版面解析
+            if (ParserType.EXCEL_POI.getType().equals(parser.getParserType())
+                    && "mineru".equalsIgnoreCase(readString(rawConfig))) {
+                DocumentParser mineru = parserSelector.select(ParserType.MINERU.getType());
+                if (mineru != null) {
+                    parser = mineru;
+                }
+            }
             log.info("文档分块-文本提取 docId={} docName={} fileType={} mimeType={} 命中解析器={}",
                     documentDO.getId(), docName, documentDO.getFileType(), mimeType, parser.getParserType());
 
@@ -346,7 +363,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
             long chunkStart = System.currentTimeMillis();
             List<VectorChunk> chunks = structuredChunkingService.chunk(
-                    parsed.blocks(), text, chunkingMode, config, null);
+                    parsed.blocks(), text, chunkingMode, config, rowsPerChunk);
             long chunkDuration = System.currentTimeMillis() - chunkStart;
 
             long embedStart = System.currentTimeMillis();
@@ -811,11 +828,6 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         return remoteFileFetcher.fetchAndStore(bucketName, sourceLocation);
     }
 
-    private ChunkingOptions buildChunkingOptions(ChunkingMode mode, KnowledgeDocumentDO documentDO) {
-        Map<String, Object> config = parseChunkConfig(documentDO.getChunkConfig());
-        return mode.createOptions(config);
-    }
-
     private String validateAndNormalizeChunkConfig(ChunkingMode mode, String chunkConfigJson) {
         if (!StringUtils.hasText(chunkConfigJson)) {
             return null;
@@ -850,6 +862,32 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             log.warn("分块参数解析失败: {}", json, e);
             return Map.of();
         }
+    }
+
+    /**
+     * 从配置 map 读整数自由键，缺失 / 非法返回 null（交由下游取默认）
+     */
+    private static Integer readInt(Map<String, Object> config) {
+        Object v = config.get("rowsPerChunk");
+        if (v instanceof Number num) {
+            return num.intValue();
+        }
+        if (v instanceof String str && StringUtils.hasText(str)) {
+            try {
+                return Integer.parseInt(str.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从配置 map 读字符串自由键，缺失返回 null
+     */
+    private static String readString(Map<String, Object> config) {
+        Object v = config.get("excelParser");
+        return v == null ? null : v.toString();
     }
 
     @Override

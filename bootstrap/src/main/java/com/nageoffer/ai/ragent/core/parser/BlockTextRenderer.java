@@ -67,6 +67,11 @@ public final class BlockTextRenderer {
                 }
                 sb.append('\n');
             } else if (b instanceof ImageBlock i) {
+                // 描述在前、图片 markdown 在后（与 ImageChunker 一致）：图生文描述是唯一可检索文本，
+                // 整篇/legacy 等拍平路径若只渲染 ![](url) 会把描述丢掉，导致永远召回不到
+                if (i.description() != null && !i.description().isBlank()) {
+                    sb.append(i.description().strip()).append("\n\n");
+                }
                 sb.append("![")
                         .append(i.caption() == null ? "" : i.caption()).append("](")
                         .append(i.asset() == null ? "" : i.asset().publicUrl()).append(")\n\n");

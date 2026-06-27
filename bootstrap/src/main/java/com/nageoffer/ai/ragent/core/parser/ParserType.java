@@ -43,9 +43,19 @@ public enum ParserType {
     EXCEL_POI("ExcelPoi"),
 
     /**
+     * CSV 解析器（自动探测字符集 + RFC4180，产单张 key-val 表格）
+     */
+    CSV("Csv"),
+
+    /**
      * MinerU SaaS 解析器（PDF / Word / PPT / Excel，含表格、图片、版面）
      */
-    MINERU("MinerU");
+    MINERU("MinerU"),
+
+    /**
+     * 图片解析器（PNG / JPG，VLM 图生文 + 原图入库）
+     */
+    IMAGE("Image");
 
     /**
      * 解析器类型名称

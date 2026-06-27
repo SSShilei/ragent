@@ -158,11 +158,18 @@ public class TableChunker implements BlockChunker<TableBlock> {
                 line.append("; ");
             }
             if (!key.isEmpty()) {
-                line.append(key).append(": ");
+                line.append(oneLine(key)).append(": ");
             }
-            line.append(value);
+            line.append(oneLine(value));
         }
         return line.toString();
+    }
+
+    /**
+     * 把 cell 内换行压成空格：嵌入文本无需保留换行，避免 key/value 中间夹断行影响检索
+     */
+    private static String oneLine(String text) {
+        return text.replaceAll("\\r\\n|\\r|\\n", " ");
     }
 
     /**
@@ -185,9 +192,23 @@ public class TableChunker implements BlockChunker<TableBlock> {
     private void appendRow(StringBuilder sb, List<String> cells) {
         sb.append('|');
         for (String cell : cells) {
-            sb.append(' ').append(cell == null ? "" : cell).append(" |");
+            sb.append(' ').append(sanitizeCell(cell)).append(" |");
         }
         sb.append('\n');
+    }
+
+    /**
+     * 清洗 cell 以适配 markdown 表格语法
+     * <p>
+     * 单元格内换行（Excel Alt+Enter）转 {@code <br>}：裸 \n 会从中间截断表格行，使整块退化为普通段落；
+     * 竖线转义为 {@code \|}：cell 内的字面 |（如多行表头展平拼接的「财务|收入」）会被误判为列分隔
+     */
+    private String sanitizeCell(String cell) {
+        if (cell == null || cell.isEmpty()) {
+            return "";
+        }
+        return cell.replace("|", "\\|")
+                .replaceAll("\\r\\n|\\r|\\n", "<br>");
     }
 
     private void appendSeparator(StringBuilder sb, int colCount) {

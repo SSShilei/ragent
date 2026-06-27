@@ -112,6 +112,11 @@ public class TikaDocumentParser implements DocumentParser {
         if (lower.startsWith("text/markdown") || lower.startsWith("text/x-markdown")) {
             return false;
         }
+        // CSV 交给 CsvDocumentParser 产 key-val 表格，不走 Tika 平文本
+        if (lower.equals("text/csv") || lower.equals("application/csv")
+                || lower.equals("text/comma-separated-values")) {
+            return false;
+        }
         // 仅接受 text/* 与 application/json|xml|xhtml+xml 等纯文本类型
         if (lower.startsWith("text/")) {
             return true;

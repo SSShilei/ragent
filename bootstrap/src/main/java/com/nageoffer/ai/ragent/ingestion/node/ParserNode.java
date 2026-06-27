@@ -96,6 +96,12 @@ public class ParserNode implements IngestionNode {
             options.put("sourceFile", fileName);
         }
 
+        // 把 documentId(=taskId)注入 options，供解析器做资产 key 命名 assets/{documentId}/...
+        // 图片解析必需，MinerU 抽图同样受益(资产稳定归属文档目录，不再落随机 UUID)
+        if (StringUtils.hasText(context.getTaskId()) && !options.containsKey("documentId")) {
+            options.put("documentId", context.getTaskId());
+        }
+
         // v1.1：调 parseStructured 拿结构化 Block 列表
         ParsedDocument parsed = parser.parseStructured(context.getRawBytes(), mimeType, options);
         List<Block> blocks = parsed.blocks() == null ? List.of() : parsed.blocks();

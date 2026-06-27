@@ -100,11 +100,11 @@ public class MinerUDocumentParser implements DocumentParser {
         if (mimeType == null) {
             return false;
         }
+        // Excel 不纳入 MIME 自动路由：默认走 POI 简单 key-val，复杂版面由上层显式选择 MinerU
         String lower = mimeType.toLowerCase(Locale.ROOT);
         return lower.contains("pdf")
                 || lower.contains("wordprocessingml") || lower.contains("msword")
-                || lower.contains("presentationml") || lower.contains("powerpoint")
-                || lower.contains("spreadsheetml") || lower.contains("ms-excel") || lower.contains("excel");
+                || lower.contains("presentationml") || lower.contains("powerpoint");
     }
 
     @Override
