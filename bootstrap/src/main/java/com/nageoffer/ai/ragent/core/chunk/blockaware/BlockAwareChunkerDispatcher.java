@@ -50,6 +50,7 @@ public class BlockAwareChunkerDispatcher {
     private final ImageChunker imageChunker;
     private final CodeChunker codeChunker;
     private final ListChunker listChunker;
+    private final ChunkPacker chunkPacker;
 
     /**
      * 把 Block 列表分发到对应 chunker,返回有序 VectorChunk 列表
@@ -78,7 +79,8 @@ public class BlockAwareChunkerDispatcher {
             result.addAll(chunks);
             chunkIndex += chunks.size();
         }
-        return result;
+        // 后处理: 把相邻文本小块贪心打包到 maxChars, 断块处按 overlapChars 做块级重叠(单块 chunker 只拆不并)
+        return chunkPacker.pack(result, config.maxChars(), config.overlapChars());
     }
 
     private List<VectorChunk> chunkOne(Block b, ChunkContext ctx) {
