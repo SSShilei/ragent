@@ -45,6 +45,14 @@ rag:
   vector:
     type: pg  # 可选 milvus / pg
 
+  keyword:
+    type: none  # 可选 none / es
+    es:
+      uris: http://127.0.0.1:9200
+      index-prefix: kb_
+      analyzer: ik_max_word
+      search-analyzer: ik_smart
+
   default:
     collection-name: rag_default_store
     dimension: 1536
@@ -100,6 +108,14 @@ rag:
         enabled: true
         min-intent-score: 0.4
         top-k-multiplier: 2
+      keyword:
+        enabled: true
+        mode: both
+        top-k-multiplier: 2
+    fusion:
+      strategy: rrf
+      rrf-k: 60
+      rerank-candidate-limit: 50  # RRF 融合后送入 Rerank 的候选上限，<=0 不截断（经验值 40~100）
 
   trace:
     enabled: true
