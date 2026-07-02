@@ -85,9 +85,24 @@ public class SearchChannelProperties {
 
         /**
          * TopK 倍数
-         * 全局检索时召回更多候选，后续通过 Rerank 筛选
+         * 仅逐库并行 fan-out 兜底路径（如 Milvus）使用，每库召回 topK * 倍数
          */
         private int topKMultiplier = 3;
+
+        /**
+         * 全局检索候选预算
+         * 单次全局查询的 LIMIT 上限，与 fusion.rerankCandidateLimit 配合控制候选规模
+         * <=0 时回退到 topK * topKMultiplier 的旧语义
+         */
+        private int candidateBudget = 100;
+
+        /**
+         * 解析全局检索候选预算
+         * 优先使用绝对预算 candidateBudget；未配置（<=0）时回退到 topK * topKMultiplier
+         */
+        public int resolveCandidateBudget(int topK) {
+            return candidateBudget > 0 ? candidateBudget : topK * Math.max(1, topKMultiplier);
+        }
     }
 
     @Data

@@ -38,6 +38,7 @@ public class VectorGlobalSearchChannel implements SearchChannel {
 
     private final SearchChannelProperties properties;
     private final KbCollectionProvider kbCollectionProvider;
+    private final RetrieverService retrieverService;
     private final CollectionParallelRetriever parallelRetriever;
 
     public VectorGlobalSearchChannel(RetrieverService retrieverService,
@@ -46,6 +47,7 @@ public class VectorGlobalSearchChannel implements SearchChannel {
                                      Executor innerRetrievalExecutor) {
         this.properties = properties;
         this.kbCollectionProvider = kbCollectionProvider;
+        this.retrieverService = retrieverService;
         this.parallelRetriever = new CollectionParallelRetriever(retrieverService, innerRetrievalExecutor);
     }
 
@@ -119,13 +121,17 @@ public class VectorGlobalSearchChannel implements SearchChannel {
                         .build();
             }
 
-            // 并行在所有 collection 中检索
-            int topKMultiplier = properties.getChannels().getVectorGlobal().getTopKMultiplier();
-            List<RetrievedChunk> allChunks = retrieveFromAllCollections(
-                    context.getMainQuestion(),
-                    collections,
-                    context.getTopK() * topKMultiplier
-            );
+            SearchChannelProperties.VectorGlobal config = properties.getChannels().getVectorGlobal();
+            List<RetrievedChunk> allChunks;
+            if (retrieverService.supportsGlobalRetrieval()) {
+                // 后端支持单次全局检索（如 PG）：一条带总预算的 SQL 跨库召回
+                int budget = config.resolveCandidateBudget(context.getTopK());
+                allChunks = retrieverService.retrieveGlobal(context.getMainQuestion(), collections, budget);
+            } else {
+                // 后端不支持（如 Milvus 每库一 collection）：退化为逐库并行 fan-out 兜底
+                int perCollectionTopK = context.getTopK() * config.getTopKMultiplier();
+                allChunks = parallelRetriever.executeParallelRetrieval(context.getMainQuestion(), collections, perCollectionTopK);
+            }
 
             long latency = System.currentTimeMillis() - startTime;
 
@@ -147,16 +153,6 @@ public class VectorGlobalSearchChannel implements SearchChannel {
                     .latencyMs(System.currentTimeMillis() - startTime)
                     .build();
         }
-    }
-
-    /**
-     * 并行在所有 collection 中检索
-     */
-    private List<RetrievedChunk> retrieveFromAllCollections(String question,
-                                                            List<String> collections,
-                                                            int topK) {
-        // 使用模板方法执行并行检索
-        return parallelRetriever.executeParallelRetrieval(question, collections, topK);
     }
 
     @Override
