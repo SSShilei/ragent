@@ -24,6 +24,7 @@ import io.milvus.v2.common.ConsistencyLevel;
 import io.milvus.v2.common.DataType;
 import io.milvus.v2.common.IndexParam;
 import io.milvus.v2.service.collection.request.CreateCollectionReq;
+import io.milvus.v2.service.collection.request.DropCollectionReq;
 import io.milvus.v2.service.collection.request.HasCollectionReq;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -125,5 +126,22 @@ public class MilvusVectorStoreAdmin implements VectorStoreAdmin {
         return milvusClient.hasCollection(
                 HasCollectionReq.builder().collectionName(logicalName).build()
         );
+    }
+
+    @Override
+    public void dropVectorSpace(String collectionName) {
+        // 当前为「每知识库一个 collection」模型，删库即 drop 该库独占的整个 collection
+        // 警告：将来若 Milvus 改为「单一共享 collection + collection_name 标量字段」（对齐 PG），
+        // 此处必须改为按 collection_name 过滤删除（deleteByExpr），与 ensureVectorSpace 成对调整，
+        // 否则 dropCollection 会误删共享 collection 中全部知识库的向量
+        boolean exists = Boolean.TRUE.equals(milvusClient.hasCollection(
+                HasCollectionReq.builder().collectionName(collectionName).build()
+        ));
+        if (!exists) {
+            log.info("Milvus collection 不存在，跳过删除: {}", collectionName);
+            return;
+        }
+        milvusClient.dropCollection(DropCollectionReq.builder().collectionName(collectionName).build());
+        log.info("已删除 Milvus collection: {}", collectionName);
     }
 }

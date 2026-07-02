@@ -22,6 +22,7 @@ import com.nageoffer.ai.ragent.rag.dto.StoredFileDTO;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import com.nageoffer.ai.ragent.rag.util.FileTypeDetector;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -29,9 +30,14 @@ import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
+import software.amazon.awssdk.services.s3.model.Delete;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 
@@ -43,8 +49,10 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class S3FileStorageService implements FileStorageService {
 
@@ -149,6 +157,40 @@ public class S3FileStorageService implements FileStorageService {
         } catch (BucketAlreadyOwnedByYouException e) {
             // 幂等：已拥有视为成功
         }
+    }
+
+    @Override
+    public void deleteBucket(String bucket) {
+        validateBucketName(bucket);
+        if (!bucketExists(bucket)) {
+            // 幂等：桶不存在视为已删除
+            return;
+        }
+
+        // S3 要求删桶前桶必须为空，先分页清空对象再删桶
+        String continuationToken = null;
+        int cleared = 0;
+        do {
+            ListObjectsV2Request listReq = ListObjectsV2Request.builder()
+                    .bucket(bucket)
+                    .continuationToken(continuationToken)
+                    .build();
+            ListObjectsV2Response listResp = s3Client.listObjectsV2(listReq);
+
+            List<ObjectIdentifier> toDelete = listResp.contents().stream()
+                    .map(S3Object::key)
+                    .map(key -> ObjectIdentifier.builder().key(key).build())
+                    .toList();
+            if (!toDelete.isEmpty()) {
+                s3Client.deleteObjects(b -> b.bucket(bucket).delete(Delete.builder().objects(toDelete).build()));
+                cleared += toDelete.size();
+            }
+
+            continuationToken = Boolean.TRUE.equals(listResp.isTruncated()) ? listResp.nextContinuationToken() : null;
+        } while (continuationToken != null);
+
+        s3Client.deleteBucket(b -> b.bucket(bucket));
+        log.info("已删除 bucket={}，清空对象数={}", bucket, cleared);
     }
 
     @Override
