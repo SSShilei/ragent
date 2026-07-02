@@ -402,8 +402,7 @@ export function KnowledgeDocumentsPage() {
   };
 
   const handleRefresh = () => {
-    setCurrent(1);
-    loadDocuments(1, statusFilter, keyword);
+    loadDocuments(current, statusFilter, keyword);
   };
 
   const handleDelete = async () => {
