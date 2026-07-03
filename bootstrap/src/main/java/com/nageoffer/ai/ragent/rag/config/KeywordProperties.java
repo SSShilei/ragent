@@ -43,17 +43,12 @@ public class KeywordProperties {
     private Es es = new Es();
 
     /**
-     * 将知识库 collection 映射为索引名称
+     * 全部知识库共用的物理索引名称
+     * <p>
+     * 与 Milvus 共享 collection、PG 共享表同构：单索引承载所有知识库，按 collection_name 字段区分
      */
-    public String indexName(String collectionName) {
-        return es.getIndexPrefix() + collectionName;
-    }
-
-    /**
-     * 全局检索使用的索引通配（覆盖所有知识库索引）
-     */
-    public String globalIndexPattern() {
-        return es.getIndexPrefix() + "*";
+    public String sharedIndex() {
+        return es.getIndex();
     }
 
     @Data
@@ -65,9 +60,9 @@ public class KeywordProperties {
         private String uris = "http://127.0.0.1:9200";
 
         /**
-         * 索引名前缀，最终索引名为 indexPrefix + collectionName
+         * 共享索引名称：所有知识库的关键词数据都写在此索引，按 collection_name 字段过滤
          */
-        private String indexPrefix = "kb_";
+        private String index = "rag_keyword_store";
 
         /**
          * 写入分词器

@@ -18,7 +18,6 @@
 package com.nageoffer.ai.ragent.rag.core.vector;
 
 import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
-import com.nageoffer.ai.ragent.rag.config.KeywordProperties;
 import com.nageoffer.ai.ragent.rag.core.vector.keyword.KeywordIndexService;
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,48 +37,41 @@ public class KeywordSyncingVectorStoreService implements VectorStoreService {
 
     private final VectorStoreService delegate;
     private final KeywordIndexService keywordIndexService;
-    private final KeywordProperties keywordProperties;
 
     public KeywordSyncingVectorStoreService(VectorStoreService delegate,
-                                            KeywordIndexService keywordIndexService,
-                                            KeywordProperties keywordProperties) {
+                                            KeywordIndexService keywordIndexService) {
         this.delegate = delegate;
         this.keywordIndexService = keywordIndexService;
-        this.keywordProperties = keywordProperties;
     }
 
     @Override
     public void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks) {
         delegate.indexDocumentChunks(collectionName, docId, chunks);
-        syncKeyword(docId, () -> keywordIndexService.indexDocumentChunks(indexName(collectionName), docId, chunks));
+        syncKeyword(docId, () -> keywordIndexService.indexDocumentChunks(collectionName, docId, chunks));
     }
 
     @Override
     public void updateChunk(String collectionName, String docId, VectorChunk chunk) {
         delegate.updateChunk(collectionName, docId, chunk);
-        syncKeyword(docId, () -> keywordIndexService.updateChunk(indexName(collectionName), docId, chunk));
+        syncKeyword(docId, () -> keywordIndexService.updateChunk(collectionName, docId, chunk));
     }
 
     @Override
     public void deleteDocumentVectors(String collectionName, String docId) {
         delegate.deleteDocumentVectors(collectionName, docId);
-        syncKeyword(docId, () -> keywordIndexService.deleteDocumentIndex(indexName(collectionName), docId));
+        syncKeyword(docId, () -> keywordIndexService.deleteDocumentIndex(collectionName, docId));
     }
 
     @Override
     public void deleteChunkById(String collectionName, String chunkId) {
         delegate.deleteChunkById(collectionName, chunkId);
-        syncKeyword(chunkId, () -> keywordIndexService.deleteChunkById(indexName(collectionName), chunkId));
+        syncKeyword(chunkId, () -> keywordIndexService.deleteChunkById(collectionName, chunkId));
     }
 
     @Override
     public void deleteChunksByIds(String collectionName, List<String> chunkIds) {
         delegate.deleteChunksByIds(collectionName, chunkIds);
-        syncKeyword(null, () -> keywordIndexService.deleteChunksByIds(indexName(collectionName), chunkIds));
-    }
-
-    private String indexName(String collectionName) {
-        return keywordProperties.indexName(collectionName);
+        syncKeyword(null, () -> keywordIndexService.deleteChunksByIds(collectionName, chunkIds));
     }
 
     /**

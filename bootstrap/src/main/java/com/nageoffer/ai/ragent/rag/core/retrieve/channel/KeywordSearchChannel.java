@@ -20,7 +20,6 @@ package com.nageoffer.ai.ragent.rag.core.retrieve.channel;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
-import com.nageoffer.ai.ragent.rag.config.KeywordProperties;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScoreFilters;
@@ -52,7 +51,6 @@ public class KeywordSearchChannel implements SearchChannel {
 
     private final KeywordRetrieverService keywordRetriever;
     private final SearchChannelProperties properties;
-    private final KeywordProperties keywordProperties;
     private final KbCollectionProvider kbCollectionProvider;
 
     @Override
@@ -79,18 +77,18 @@ public class KeywordSearchChannel implements SearchChannel {
     public SearchChannelResult search(SearchContext context) {
         long startTime = System.currentTimeMillis();
         try {
-            List<String> indices = resolveIndices(context);
-            if (CollUtil.isEmpty(indices)) {
-                log.info("关键词检索未解析到目标索引，跳过");
+            List<String> collections = resolveCollections(context);
+            if (CollUtil.isEmpty(collections)) {
+                log.info("关键词检索未解析到目标知识库，跳过");
                 return emptyResult(startTime);
             }
 
             int topKMultiplier = properties.getChannels().getKeyword().getTopKMultiplier();
             int topK = context.getTopK() * Math.max(1, topKMultiplier);
-            List<RetrievedChunk> chunks = keywordRetriever.search(context.getMainQuestion(), indices, topK);
+            List<RetrievedChunk> chunks = keywordRetriever.search(context.getMainQuestion(), collections, topK);
 
             long latency = System.currentTimeMillis() - startTime;
-            log.info("关键词检索完成，索引={}，检索到 {} 个 Chunk，耗时 {}ms", indices, chunks.size(), latency);
+            log.info("关键词检索完成，知识库={}，检索到 {} 个 Chunk，耗时 {}ms", collections, chunks.size(), latency);
 
             return SearchChannelResult.builder()
                     .channelType(SearchChannelType.KEYWORD)
@@ -105,37 +103,35 @@ public class KeywordSearchChannel implements SearchChannel {
     }
 
     /**
-     * 按 mode 解析目标索引
-     * global 全库通配 / intent 仅意图域索引 / both 有意图走意图域，否则回退全库
+     * 按 mode 解析目标知识库 collection
+     * global 全库 / intent 仅意图域 / both 有意图走意图域，否则回退全库
      */
-    private List<String> resolveIndices(SearchContext context) {
+    private List<String> resolveCollections(SearchContext context) {
         String mode = properties.getChannels().getKeyword().getMode();
-        List<String> intentIndices = extractIntentIndices(context);
+        List<String> intentCollections = extractIntentCollections(context);
 
         if (MODE_GLOBAL.equalsIgnoreCase(mode)) {
-            return globalIndices();
+            return globalCollections();
         }
         if (MODE_INTENT.equalsIgnoreCase(mode)) {
-            return intentIndices;
+            return intentCollections;
         }
         // both
-        return CollUtil.isNotEmpty(intentIndices) ? intentIndices : globalIndices();
+        return CollUtil.isNotEmpty(intentCollections) ? intentCollections : globalCollections();
     }
 
     /**
-     * 全局检索索引：与向量全局检索同源，取所有有效知识库 collection 映射的索引
-     * 不再用 kb_* 通配，避免命中已删除库残留、测试库、旧 schema 等无效索引，保证两路「全局」语义一致
+     * 全局检索范围：与向量全局检索同源，取所有有效知识库 collection
+     * 以知识库表为准而非索引通配，避免命中已删除库残留、测试库等无效数据，保证两路「全局」语义一致
      */
-    private List<String> globalIndices() {
-        return kbCollectionProvider.listActiveCollections().stream()
-                .map(keywordProperties::indexName)
-                .toList();
+    private List<String> globalCollections() {
+        return kbCollectionProvider.listActiveCollections();
     }
 
     /**
-     * 从意图识别结果提取 KB 意图对应的索引名称
+     * 从意图识别结果提取 KB 意图对应的 collection 名称
      */
-    private List<String> extractIntentIndices(SearchContext context) {
+    private List<String> extractIntentCollections(SearchContext context) {
         if (CollUtil.isEmpty(context.getIntents())) {
             return List.of();
         }
@@ -146,7 +142,6 @@ public class KeywordSearchChannel implements SearchChannel {
                 .map(ns -> ns.getNode().getCollectionName())
                 .filter(StrUtil::isNotBlank)
                 .distinct()
-                .map(keywordProperties::indexName)
                 .toList();
     }
 

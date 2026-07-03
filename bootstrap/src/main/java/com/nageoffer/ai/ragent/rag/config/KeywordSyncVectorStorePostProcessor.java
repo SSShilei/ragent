@@ -43,7 +43,6 @@ import org.springframework.stereotype.Component;
 public class KeywordSyncVectorStorePostProcessor implements BeanPostProcessor {
 
     private final ObjectProvider<KeywordIndexService> keywordIndexServiceProvider;
-    private final ObjectProvider<KeywordProperties> keywordPropertiesProvider;
 
     @Override
     public Object postProcessAfterInitialization(@NonNull Object bean, @NonNull String beanName) {
@@ -52,8 +51,7 @@ public class KeywordSyncVectorStorePostProcessor implements BeanPostProcessor {
             KeywordIndexService keywordIndexService = keywordIndexServiceProvider.getIfAvailable();
             if (keywordIndexService != null) {
                 log.info("检测到关键词索引实现，向量写入将同步维护关键词索引, vectorStore={}", beanName);
-                return new KeywordSyncingVectorStoreService(
-                        vectorStore, keywordIndexService, keywordPropertiesProvider.getObject());
+                return new KeywordSyncingVectorStoreService(vectorStore, keywordIndexService);
             }
         }
         return bean;

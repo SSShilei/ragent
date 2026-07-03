@@ -35,12 +35,12 @@ import java.util.List;
 public interface KeywordRetrieverService {
 
     /**
-     * 在指定索引内做关键词检索
+     * 在共享索引内做关键词检索，按 collection 过滤
      *
-     * @param query      用户问题（已重写）
-     * @param indexNames 目标索引名称集合（对应知识库 collection 映射的索引），空表示全局
-     * @param topK       召回数量
+     * @param query           用户问题（已重写）
+     * @param collectionNames 目标知识库 collection 集合（作为 collection_name 过滤条件），空表示不限库（全局）
+     * @param topK            召回数量
      * @return 命中 Chunk 列表，按相关性（BM25）倒序，id 与向量库主键 chunkId 对齐
      */
-    List<RetrievedChunk> search(String query, List<String> indexNames, int topK);
+    List<RetrievedChunk> search(String query, List<String> collectionNames, int topK);
 }

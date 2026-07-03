@@ -49,7 +49,7 @@ rag:
     type: none  # 可选 none / es
     es:
       uris: http://127.0.0.1:9200
-      index-prefix: kb_
+      index: rag_keyword_store  # 全库共享索引，按 collection_name 字段区分知识库
       analyzer: ik_max_word
       search-analyzer: ik_smart
 

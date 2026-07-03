@@ -18,6 +18,7 @@
 package com.nageoffer.ai.ragent.rag.core.retrieve.keyword;
 
 import cn.hutool.core.collection.CollUtil;
+import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
@@ -36,8 +37,9 @@ import java.util.List;
 /**
  * 基于 Elasticsearch 的关键词检索服务
  * <p>
- * 使用 multi_match + BM25 在 content / outline 字段上做全文匹配，
- * 命中 _id 即向量库主键 chunkId，映射为与向量结果同构的 {@link RetrievedChunk}
+ * 在共享索引上用 multi_match + BM25 在 content / outline 字段做全文匹配，
+ * 并以 collection_name terms 过滤限定知识库范围；命中 _id 即向量库主键 chunkId，
+ * 映射为与向量结果同构的 {@link RetrievedChunk}
  * <p>
  * 仅当开启 ES 关键词检索（rag.keyword.type=es）时装配
  */
@@ -51,20 +53,30 @@ public class EsKeywordRetrieverService implements KeywordRetrieverService {
     private final KeywordProperties keywordProperties;
 
     @Override
-    public List<RetrievedChunk> search(String query, List<String> indexNames, int topK) {
-        List<String> indices = CollUtil.isNotEmpty(indexNames)
-                ? indexNames
-                : List.of(keywordProperties.globalIndexPattern());
+    public List<RetrievedChunk> search(String query, List<String> collectionNames, int topK) {
+        String index = keywordProperties.sharedIndex();
+        List<FieldValue> collectionFilter = CollUtil.isEmpty(collectionNames)
+                ? List.of()
+                : collectionNames.stream().map(FieldValue::of).toList();
 
         try {
             SearchResponse<KeywordHitDocument> resp = esClient.search(s -> s
-                            .index(indices)
+                            .index(index)
                             .size(topK)
                             .ignoreUnavailable(true)
                             .allowNoIndices(true)
-                            .query(q -> q.multiMatch(mm -> mm
-                                    .query(query)
-                                    .fields("content", "outline"))),
+                            .query(q -> q.bool(b -> {
+                                b.must(m -> m.multiMatch(mm -> mm
+                                        .query(query)
+                                        .fields("content", "outline")));
+                                // 空表示不限库（全局）；否则以 collection_name terms 限定目标知识库范围
+                                if (!collectionFilter.isEmpty()) {
+                                    b.filter(f -> f.terms(t -> t
+                                            .field("collection_name")
+                                            .terms(tv -> tv.value(collectionFilter))));
+                                }
+                                return b;
+                            })),
                     KeywordHitDocument.class);
 
             List<Hit<KeywordHitDocument>> hits = resp.hits().hits();
@@ -75,7 +87,7 @@ public class EsKeywordRetrieverService implements KeywordRetrieverService {
                     .map(this::toChunk)
                     .toList();
         } catch (Exception e) {
-            log.error("ES 关键词检索失败, indices={}, query={}", indices, query, e);
+            log.error("ES 关键词检索失败, index={}, collections={}, query={}", index, collectionNames, query, e);
             return List.of();
         }
     }
