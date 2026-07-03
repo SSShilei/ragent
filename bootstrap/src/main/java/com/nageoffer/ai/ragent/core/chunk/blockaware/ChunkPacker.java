@@ -34,16 +34,16 @@ import java.util.Set;
  * 各类型 chunker 只负责"单个 block 内"的切分, 天然是"只拆不并": 一个短段落、一个短列表都会各自成块,
  * 512 体量预算只当上限、从不当目标, 于是结构清晰的小文档被切成一堆碎块
  * <p>
- * 本打包器在 dispatch 产出的有序 chunk 上做一次贪心合并: 把相邻的<b>可流动文本块</b>(段落 / 列表 / 无描述图片)累加到接近
- * {@code maxChars} 再落块, 遇到<b>原子块</b>(表格 / 代码 / 有描述图片)或已达体量上限的大块就断开, 使块大小真正贴合预算
+ * 本打包器在 dispatch 产出的有序 chunk 上做一次贪心合并: 把相邻的<b>可流动块</b>(段落 / 列表 / 图片)累加到接近
+ * {@code maxChars} 再落块, 遇到<b>原子块</b>(表格 / 代码)或已达体量上限的大块就断开, 使块大小真正贴合预算
  */
 @Component
 public class ChunkPacker {
 
     /**
-     * 可合并的块类型: 纯文本流, 相邻小块可拼到同一 chunk
+     * 可合并的块类型: 文本流与图片引用, 相邻小块可拼到同一 chunk; 表格 / 代码等结构完整块保持原子
      */
-    private static final Set<String> MERGEABLE_TYPES = Set.of("PARAGRAPH", "LIST");
+    private static final Set<String> MERGEABLE_TYPES = Set.of("PARAGRAPH", "LIST", "IMAGE");
     /**
      * 合并时块间分隔符, 保留段落 / 列表边界
      */
@@ -133,22 +133,12 @@ public class ChunkPacker {
     }
 
     /**
-     * 可合并判定(自身未达体量上限, 超限大块是切分产物, 视为原子):
-     * <ul>
-     *   <li>文本流(段落 / 列表)恒可合并</li>
-     *   <li><b>无描述的纯 URL 图片</b>(embeddingText 为空, MinerU 抽图无 caption): 无语义可检索, 合并进相邻正文,
-     *       免得留下只含 URL 的废块并割裂上下文; <b>有 vision 描述的图</b>保持 atomic 独立成块, 可单独检索</li>
-     * </ul>
+     * 可合并: 类型属于可流动块(文本 / 图片), 且自身未达体量上限(超限大块是切分产物, 视为原子, 不再粘连)
+     * <p>
+     * 图片一律并入相邻上下文(不分有无描述): 图与它的前导语 / 解释文字同块, 检索命中即带图, 也不割裂正文
      */
     private static boolean isMergeable(VectorChunk c, int maxChars) {
-        if (contentLength(c) >= maxChars) {
-            return false;
-        }
-        String type = c.getBlockType();
-        if (MERGEABLE_TYPES.contains(type)) {
-            return true;
-        }
-        return "IMAGE".equals(type) && !StringUtils.hasText(c.getEmbeddingText());
+        return MERGEABLE_TYPES.contains(c.getBlockType()) && contentLength(c) < maxChars;
     }
 
     /**
