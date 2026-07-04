@@ -80,4 +80,19 @@ public class MinerUProperties {
      * 全局 outstanding 任务上限，防止打爆 SaaS，默认 16
      */
     private int concurrencyLimit = 16;
+
+    /**
+     * MinerU 解析分布式信号量名称
+     */
+    private String semaphoreName = "rag:mineru:parse";
+
+    /**
+     * 获取 MinerU 解析许可最大等待时间（秒）
+     */
+    private int maxWaitSeconds = 30;
+
+    /**
+     * MinerU 解析许可自动释放时间（秒），需大于 timeoutSeconds
+     */
+    private int leaseSeconds = 900;
 }

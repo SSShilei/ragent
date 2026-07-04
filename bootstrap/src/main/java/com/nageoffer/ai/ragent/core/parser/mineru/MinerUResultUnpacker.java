@@ -203,7 +203,6 @@ public class MinerUResultUnpacker {
                 // 转为浏览器可直连的公开 URL(asset-bucket 已开公共读)，供 markdown 图片链接固化入库
                 String publicUrl = fileStorageService.getPublicUrl(stored.getUrl());
                 result.put(zipPath, publicUrl);
-                log.debug("MinerU 图片上传 zipPath={} → {}", zipPath, publicUrl);
             } catch (Exception ex) {
                 log.error("MinerU 图片上传失败 zipPath={}", zipPath, ex);
                 throw new ServiceException("MinerU 图片上传失败 " + zipPath + ": " + ex.getMessage());
