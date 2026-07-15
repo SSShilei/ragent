@@ -20,6 +20,7 @@ package com.nageoffer.ai.ragent.rag.core.prompt;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
+import com.nageoffer.ai.ragent.rag.config.RAGConfigProperties;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentNode;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -28,6 +29,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +42,13 @@ import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CONTEXT_FORMAT_PA
 @RequiredArgsConstructor
 public class DefaultContextFormatter implements ContextFormatter {
 
+    /**
+     * 相邻块重叠去重的扫描窗口上限 超过此长度的重叠不再匹配 兼顾正确性与性能
+     */
+    private static final int MAX_OVERLAP_SCAN = 1000;
+
     private final PromptTemplateLoader templateLoader;
+    private final RAGConfigProperties ragConfigProperties;
 
     @Override
     public String formatKbContext(List<NodeScore> kbIntents, Map<String, List<RetrievedChunk>> rerankedByIntent, int topK) {
@@ -65,8 +73,8 @@ public class DefaultContextFormatter implements ContextFormatter {
             return "";
         }
         String snippet = StrUtil.emptyIfNull(nodeScore.getNode().getPromptSnippet()).trim();
-        String body = joinChunkTexts(chunks, topK);
-        return renderKbSection(renderSnippetRules(snippet), body);
+        String docBlocks = renderChunksGroupedByDoc(chunks, topK);
+        return renderKbSection(renderSnippetRules(snippet), docBlocks);
     }
 
     /**
@@ -89,21 +97,22 @@ public class DefaultContextFormatter implements ContextFormatter {
             snippetSection = renderSnippetRules(numberedRules);
         }
 
-        // 2. 合并所有意图的文档片段（去重）
-        List<RetrievedChunk> allChunks = rerankedByIntent.values().stream()
+        // 2. 合并所有意图的文档片段（按 chunk id 去重，保持相关性顺序）
+        Map<String, RetrievedChunk> dedupById = new LinkedHashMap<>();
+        rerankedByIntent.values().stream()
                 .flatMap(List::stream)
-                .distinct()
-                .limit(topK)
-                .toList();
+                .forEach(chunk -> {
+                    String key = StrUtil.isNotBlank(chunk.getId()) ? chunk.getId() : "__anon__" + dedupById.size();
+                    dedupById.putIfAbsent(key, chunk);
+                });
+        List<RetrievedChunk> allChunks = new ArrayList<>(dedupById.values());
 
         if (allChunks.isEmpty()) {
             return snippetSection;
         }
 
-        String body = allChunks.stream()
-                .map(RetrievedChunk::getText)
-                .collect(Collectors.joining("\n"));
-        return renderKbSection(snippetSection, body);
+        String docBlocks = renderChunksGroupedByDoc(allChunks, topK);
+        return renderKbSection(snippetSection, docBlocks);
     }
 
     private String formatChunksWithoutIntent(Map<String, List<RetrievedChunk>> rerankedByIntent, int topK) {
@@ -127,10 +136,8 @@ public class DefaultContextFormatter implements ContextFormatter {
             return "";
         }
 
-        String body = chunks.stream()
-                .map(RetrievedChunk::getText)
-                .collect(Collectors.joining("\n"));
-        return renderKbSection("", body);
+        String docBlocks = renderChunksGroupedByDoc(chunks, topK);
+        return renderKbSection("", docBlocks);
     }
 
     @Override
@@ -178,10 +185,10 @@ public class DefaultContextFormatter implements ContextFormatter {
 
     // ==================== 工具方法 ====================
 
-    private String renderKbSection(String snippetSection, String chunksBody) {
+    private String renderKbSection(String snippetSection, String docBlocks) {
         return templateLoader.renderSection(CONTEXT_FORMAT_PATH, "kb-section", Map.of(
                 "snippet_section", snippetSection,
-                "chunks_body", chunksBody
+                "doc_blocks", docBlocks
         ));
     }
 
@@ -192,11 +199,122 @@ public class DefaultContextFormatter implements ContextFormatter {
         return templateLoader.renderSection(CONTEXT_FORMAT_PATH, "snippet-rules", Map.of("rules", snippet));
     }
 
-    private String joinChunkTexts(List<RetrievedChunk> chunks, int topK) {
-        return chunks.stream()
-                .limit(topK)
-                .map(RetrievedChunk::getText)
+    /**
+     * 按文档聚合渲染 chunk 列表
+     * <p>
+     * 文档之间按相关性排序（各文档首个命中块在原列表中的顺序，即该文档最佳块的排名），
+     * 文档内部按 {@code chunkIndex} 升序还原原文顺序；docId 缺失的块各自单独成组、留在原位
+     */
+    private String renderChunksGroupedByDoc(List<RetrievedChunk> chunks, int topK) {
+        long limit = topK > 0 ? topK : Long.MAX_VALUE;
+        List<RetrievedChunk> limited = chunks.stream().limit(limit).toList();
+        if (limited.isEmpty()) {
+            return "";
+        }
+
+        // 按 docId 分组：LinkedHashMap 保持首次出现顺序 = 文档间的相关性排序；docId 为空的块各自单独成组
+        LinkedHashMap<String, List<RetrievedChunk>> groups = new LinkedHashMap<>();
+        int anonymousSeq = 0;
+        for (RetrievedChunk chunk : limited) {
+            String key = StrUtil.isNotBlank(chunk.getDocId()) ? chunk.getDocId() : "__nodoc__" + (anonymousSeq++);
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(chunk);
+        }
+
+        return groups.values().stream()
+                .map(this::renderDocBlock)
                 .collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * 渲染单个文档块：组内按序号排序、相邻块重叠去重后拼接，带上文档标题作为内部锚点
+     */
+    private String renderDocBlock(List<RetrievedChunk> group) {
+        List<RetrievedChunk> ordered = group.stream()
+                .sorted(Comparator.comparing(RetrievedChunk::getChunkIndex,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+
+        String chunks = joinWithOverlapDedup(ordered);
+        String title = resolveTitle(group);
+        if (StrUtil.isNotBlank(title)) {
+            return templateLoader.renderSection(CONTEXT_FORMAT_PATH, "kb-doc-block", Map.of(
+                    "source", title,
+                    "chunks", chunks
+            ));
+        }
+        return templateLoader.renderSection(CONTEXT_FORMAT_PATH, "kb-doc-block-untitled", Map.of(
+                "chunks", chunks
+        ));
+    }
+
+    /**
+     * 组内拼接文本：对同文档、序号相邻的块去掉切分产生的 overlap 重复段
+     */
+    private String joinWithOverlapDedup(List<RetrievedChunk> ordered) {
+        boolean dedup = Boolean.TRUE.equals(ragConfigProperties.getContextOverlapDedupEnabled());
+        StringBuilder sb = new StringBuilder();
+        RetrievedChunk prev = null;
+        for (RetrievedChunk chunk : ordered) {
+            String text = StrUtil.emptyIfNull(chunk.getText());
+            if (dedup && prev != null && isContiguous(prev, chunk)) {
+                text = stripOverlap(prev.getText(), text);
+            }
+            if (!text.isEmpty()) {
+                if (!sb.isEmpty()) {
+                    sb.append("\n");
+                }
+                sb.append(text);
+            }
+            prev = chunk;
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 两个块在文档内是否序号相邻（prev 紧邻 curr 的前一块）
+     */
+    private boolean isContiguous(RetrievedChunk prev, RetrievedChunk curr) {
+        Integer a = prev.getChunkIndex();
+        Integer b = curr.getChunkIndex();
+        return a != null && b != null && b - a == 1;
+    }
+
+    /**
+     * 去掉 next 开头与 prev 结尾重复的 overlap 段
+     * <p>
+     * 在有界窗口内求「prev 的最长后缀 == next 的最长前缀」，命中则从 next 去掉该前缀；未命中原样返回
+     */
+    private String stripOverlap(String prev, String next) {
+        if (StrUtil.isEmpty(prev) || StrUtil.isEmpty(next)) {
+            return StrUtil.emptyIfNull(next);
+        }
+        int max = Math.min(Math.min(prev.length(), next.length()), MAX_OVERLAP_SCAN);
+        for (int k = max; k >= 1; k--) {
+            if (prev.regionMatches(prev.length() - k, next, 0, k)) {
+                return next.substring(k);
+            }
+        }
+        return next;
+    }
+
+    /**
+     * 取文档组的标题（首个非空 docName，剥掉文件扩展名）
+     */
+    private String resolveTitle(List<RetrievedChunk> group) {
+        return group.stream()
+                .map(RetrievedChunk::getDocName)
+                .filter(StrUtil::isNotBlank)
+                .map(DefaultContextFormatter::stripExtension)
+                .findFirst()
+                .orElse("");
+    }
+
+    private static String stripExtension(String docName) {
+        if (docName == null) {
+            return null;
+        }
+        int dot = docName.lastIndexOf('.');
+        return (dot > 0 && dot < docName.length() - 1) ? docName.substring(0, dot) : docName;
     }
 
     private String mergeAllResultsToText(Map<String, List<CallToolResult>> toolResults) {
