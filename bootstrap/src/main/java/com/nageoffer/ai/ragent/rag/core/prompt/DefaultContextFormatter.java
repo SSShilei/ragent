@@ -20,7 +20,6 @@ package com.nageoffer.ai.ragent.rag.core.prompt;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
-import com.nageoffer.ai.ragent.rag.config.RAGConfigProperties;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentNode;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
@@ -42,13 +41,7 @@ import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CONTEXT_FORMAT_PA
 @RequiredArgsConstructor
 public class DefaultContextFormatter implements ContextFormatter {
 
-    /**
-     * 相邻块重叠去重的扫描窗口上限 超过此长度的重叠不再匹配 兼顾正确性与性能
-     */
-    private static final int MAX_OVERLAP_SCAN = 1000;
-
     private final PromptTemplateLoader templateLoader;
-    private final RAGConfigProperties ragConfigProperties;
 
     @Override
     public String formatKbContext(List<NodeScore> kbIntents, Map<String, List<RetrievedChunk>> rerankedByIntent, int topK) {
@@ -226,7 +219,7 @@ public class DefaultContextFormatter implements ContextFormatter {
     }
 
     /**
-     * 渲染单个文档块：组内按序号排序、相邻块重叠去重后拼接，带上文档标题作为内部锚点
+     * 渲染单个文档块：组内按序号排序后拼接，带上文档标题作为内部锚点
      */
     private String renderDocBlock(List<RetrievedChunk> group) {
         List<RetrievedChunk> ordered = group.stream()
@@ -234,8 +227,8 @@ public class DefaultContextFormatter implements ContextFormatter {
                         Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
 
-        String chunks = joinWithOverlapDedup(ordered);
-        String title = resolveTitle(group);
+        String chunks = joinDocBody(ordered);
+        String title = sanitizeTitle(resolveTitle(group));
         if (StrUtil.isNotBlank(title)) {
             return templateLoader.renderSection(CONTEXT_FORMAT_PATH, "kb-doc-block", Map.of(
                     "source", title,
@@ -248,53 +241,24 @@ public class DefaultContextFormatter implements ContextFormatter {
     }
 
     /**
-     * 组内拼接文本：对同文档、序号相邻的块去掉切分产生的 overlap 重复段
+     * 组内拼接文本：同文档的块按 index 排好后用换行顺次拼接
      */
-    private String joinWithOverlapDedup(List<RetrievedChunk> ordered) {
-        boolean dedup = Boolean.TRUE.equals(ragConfigProperties.getContextOverlapDedupEnabled());
-        StringBuilder sb = new StringBuilder();
-        RetrievedChunk prev = null;
-        for (RetrievedChunk chunk : ordered) {
-            String text = StrUtil.emptyIfNull(chunk.getText());
-            if (dedup && prev != null && isContiguous(prev, chunk)) {
-                text = stripOverlap(prev.getText(), text);
-            }
-            if (!text.isEmpty()) {
-                if (!sb.isEmpty()) {
-                    sb.append("\n");
-                }
-                sb.append(text);
-            }
-            prev = chunk;
-        }
-        return sb.toString();
+    private String joinDocBody(List<RetrievedChunk> ordered) {
+        return ordered.stream()
+                .map(RetrievedChunk::getText)
+                .map(StrUtil::emptyIfNull)
+                .filter(text -> !text.isEmpty())
+                .collect(Collectors.joining("\n"));
     }
 
     /**
-     * 两个块在文档内是否序号相邻（prev 紧邻 curr 的前一块）
+     * 清洗文档标题里会破坏伪标签属性的字符（引号、尖括号），避免污染 source 属性
      */
-    private boolean isContiguous(RetrievedChunk prev, RetrievedChunk curr) {
-        Integer a = prev.getChunkIndex();
-        Integer b = curr.getChunkIndex();
-        return a != null && b != null && b - a == 1;
-    }
-
-    /**
-     * 去掉 next 开头与 prev 结尾重复的 overlap 段
-     * <p>
-     * 在有界窗口内求「prev 的最长后缀 == next 的最长前缀」，命中则从 next 去掉该前缀；未命中原样返回
-     */
-    private String stripOverlap(String prev, String next) {
-        if (StrUtil.isEmpty(prev) || StrUtil.isEmpty(next)) {
-            return StrUtil.emptyIfNull(next);
+    private String sanitizeTitle(String title) {
+        if (StrUtil.isBlank(title)) {
+            return "";
         }
-        int max = Math.min(Math.min(prev.length(), next.length()), MAX_OVERLAP_SCAN);
-        for (int k = max; k >= 1; k--) {
-            if (prev.regionMatches(prev.length() - k, next, 0, k)) {
-                return next.substring(k);
-            }
-        }
-        return next;
+        return title.replaceAll("[\"<>]", "").trim();
     }
 
     /**

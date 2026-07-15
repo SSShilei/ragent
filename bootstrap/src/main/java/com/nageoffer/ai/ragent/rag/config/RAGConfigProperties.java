@@ -68,13 +68,4 @@ public class RAGConfigProperties {
      */
     @Value("${rag.context.enrich.enabled:true}")
     private Boolean contextEnrichEnabled;
-
-    /**
-     * 相邻块重叠去重开关
-     * <p>
-     * 控制组装上下文时是否对同一文档、序号相邻的分块拼接处去掉切分产生的重复文本
-     * 默认值：{@code true}
-     */
-    @Value("${rag.context.overlap-dedup.enabled:true}")
-    private Boolean contextOverlapDedupEnabled;
 }
