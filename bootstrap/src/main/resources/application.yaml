@@ -72,7 +72,7 @@ rag:
       search-analyzer: ik_smart
 
   graph:
-    type: lightrag  # 可选 none / lightrag；none 时不注册图谱检索通道与写入同步装饰器
+    type: none  # 可选 none / lightrag；none 时不注册图谱检索通道与写入同步装饰器
     lightrag:
       base-url: http://127.0.0.1:9621
       query-mode: mix  # naive / local / global / hybrid / mix
