@@ -223,7 +223,9 @@ public class SearchChannelProperties {
 
         /**
          * RRF 平滑常数 k
-         * 值越大越弱化高名次的优势，通常取 60
+         * 值越大越弱化高名次的优势。经典取 60（面向上千候选的检索场景），
+         * 但本链路每通道候选通常仅约 20~40 条，k=60 会把名次差异过度抹平（头部与尾部分数几乎拉不开），
+         * 建议按候选池量级调低（如 20）让头部更有区分度；具体值配合检索归因日志校准
          */
         private int rrfK = 60;
 
@@ -234,5 +236,48 @@ public class SearchChannelProperties {
          * <=0 表示不截断（全量送入 Rerank），行业经验值 40~100
          */
         private int rerankCandidateLimit = 50;
+
+        /**
+         * 各通道 RRF 贡献权重
+         * 让不同可信度的通道在融合时话语权不同：RRF 只用名次、丢弃分数量纲，无权重时各通道等权，
+         * 一个新接入 / 噪声较多的通道会与最可信通道在每个名次上平起平坐。加权后 delta = 权重 / (k + rank)
+         */
+        private ChannelWeights channelWeights = new ChannelWeights();
+    }
+
+    @Data
+    public static class ChannelWeights {
+
+        /**
+         * 意图定向（向量精查命中库）权重 最可信
+         */
+        private double intentDirected = 1.0;
+
+        /**
+         * 向量全局（跨库兜底）权重
+         */
+        private double vectorGlobal = 1.0;
+
+        /**
+         * 关键词（BM25）权重
+         */
+        private double keyword = 1.0;
+
+        /**
+         * 图谱权重
+         * 图谱为新接入通道、跑在单一全局图上、证据仅经结果侧过滤，默认降权，
+         * 待归因日志验证其 Rerank 存活率后再上调；存活率长期为 0 说明当前是纯成本
+         */
+        private double graph = 0.5;
+
+        /**
+         * 联网检索权重
+         */
+        private double webSearch = 0.5;
+
+        /**
+         * 未显式配置通道的兜底权重
+         */
+        private double defaultWeight = 1.0;
     }
 }

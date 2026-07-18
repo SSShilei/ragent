@@ -17,6 +17,7 @@
 
 package com.nageoffer.ai.ragent.rag.core.retrieve.postprocessor;
 
+import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.knowledge.service.impl.ChunkMetadataResolver;
 import com.nageoffer.ai.ragent.knowledge.service.impl.ChunkMetadataResolver.ChunkMeta;
@@ -71,10 +72,8 @@ public class MetadataEnrichmentPostProcessor implements SearchResultPostProcesso
 
         List<String> chunkIds = chunks.stream().map(RetrievedChunk::getId).toList();
         Map<String, ChunkMeta> metaById = chunkMetadataResolver.resolve(chunkIds);
-        if (metaById.isEmpty()) {
-            return chunks;
-        }
 
+        // 1）按 chunkId 富化：向量 / 关键词证据的 chunk.id 即向量库主键，回表补齐 docId / 序号 / 标题
         // 原地富化，保持相关性顺序不变
         for (RetrievedChunk chunk : chunks) {
             ChunkMeta meta = metaById.get(chunk.getId());
@@ -85,6 +84,35 @@ public class MetadataEnrichmentPostProcessor implements SearchResultPostProcesso
             chunk.setChunkIndex(meta.chunkIndex());
             chunk.setDocName(meta.docName());
         }
+
+        // 2）按 docId 补标题：图谱证据的 chunk.id 非向量库主键、上一步未命中，但已带归属 docId，
+        // 据此补真实文档标题，使其与同源向量证据在上下文里聚合进同一文档块
+        fillDocNamesByDocId(chunks);
         return chunks;
+    }
+
+    /**
+     * 对上一步按 chunkId 未补到标题、但已带 docId 的证据（典型为图谱证据）按 docId 回表补真实文档标题
+     */
+    private void fillDocNamesByDocId(List<RetrievedChunk> chunks) {
+        List<String> pendingDocIds = chunks.stream()
+                .filter(c -> StrUtil.isBlank(c.getDocName()) && StrUtil.isNotBlank(c.getDocId()))
+                .map(RetrievedChunk::getDocId)
+                .toList();
+        if (pendingDocIds.isEmpty()) {
+            return;
+        }
+        Map<String, String> docNameById = chunkMetadataResolver.resolveDocNames(pendingDocIds);
+        if (docNameById.isEmpty()) {
+            return;
+        }
+        for (RetrievedChunk chunk : chunks) {
+            if (StrUtil.isBlank(chunk.getDocName()) && StrUtil.isNotBlank(chunk.getDocId())) {
+                String docName = docNameById.get(chunk.getDocId());
+                if (StrUtil.isNotBlank(docName)) {
+                    chunk.setDocName(docName);
+                }
+            }
+        }
     }
 }

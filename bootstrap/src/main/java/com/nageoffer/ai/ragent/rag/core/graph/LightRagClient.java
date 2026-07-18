@@ -36,8 +36,11 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * LightRAG 微服务 HTTP 客户端
@@ -55,6 +58,14 @@ public class LightRagClient {
 
     private static final MediaType JSON = MediaType.parse("application/json");
 
+    /**
+     * file_path 中归属 docId 的匹配模式
+     * <p>
+     * 写入时 file_source 编码为 {collectionName}_{docId}，docId 为雪花纯数字；取 file_path 中最后一段连续数字为归属 docId，
+     * 兼容服务端可能对 file_path 追加的扩展名 / 路径修饰
+     */
+    private static final Pattern DOC_ID_PATTERN = Pattern.compile("(\\d+)");
+
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final GraphProperties properties;
@@ -68,16 +79,31 @@ public class LightRagClient {
     }
 
     /**
-     * 检索图谱上下文，返回命中的来源证据（引用）
-     * <p>
-     * only_need_context=true 只取证据、不让 LightRAG 生成答案；证据回到主链路，
-     * 由既有融合 / Rerank / 上下文组装统一处理，与其它通道一视同仁
+     * 检索图谱上下文，返回命中的来源证据（引用）：全局视图、不按库过滤
      *
      * @param question 查询问题
      * @param mode     LightRAG 查询模式 naive / local / global / hybrid / mix
      * @param topK     期望候选数
      */
     public List<RetrievedChunk> retrieve(String question, String mode, int topK) {
+        return retrieve(question, mode, topK, List.of());
+    }
+
+    /**
+     * 检索图谱上下文，并按 collections 过滤到命中库（结果侧「意图定向」）
+     * <p>
+     * only_need_context=true 只取证据、不让 LightRAG 生成答案；证据回到主链路，
+     * 由既有融合 / Rerank / 上下文组装统一处理，与其它通道一视同仁
+     * <p>
+     * LightRAG /query 无 per-request workspace，此处查全局图后在 Java 侧按 file_path 归属过滤到命中库，
+     * 与向量 / 关键词的「意图域」语义对齐；collections 为空表示不过滤（全局视图）
+     *
+     * @param question    查询问题
+     * @param mode        LightRAG 查询模式 naive / local / global / hybrid / mix
+     * @param topK        期望候选数
+     * @param collections 目标知识库 collection 名，空则不过滤
+     */
+    public List<RetrievedChunk> retrieve(String question, String mode, int topK, Collection<String> collections) {
         if (StrUtil.isBlank(question)) {
             return List.of();
         }
@@ -92,7 +118,7 @@ public class LightRagClient {
                 body.put("top_k", topK);
             }
             JsonNode root = post("/query", body);
-            return root != null ? parseReferences(root) : List.of();
+            return root != null ? parseReferences(root, collections) : List.of();
         } catch (Exception e) {
             log.warn("LightRAG 检索失败，降级为空结果: {}", e.getMessage());
             return List.of();
@@ -318,8 +344,11 @@ public class LightRagClient {
      * <p>
      * 结构 {@code {"response":"...","references":[{"reference_id","file_path","content":[...]}]}}；
      * references 缺失或为空时回退：把 response 上下文整体作为一个证据块，防御式读取
+     * <p>
+     * collections 非空时按 file_path 归属过滤到命中库；此时 response 兜底块无 file_path、无法归属，故一并跳过
      */
-    private List<RetrievedChunk> parseReferences(JsonNode root) {
+    private List<RetrievedChunk> parseReferences(JsonNode root, Collection<String> collections) {
+        boolean filterByCollection = collections != null && !collections.isEmpty();
         List<RetrievedChunk> chunks = new ArrayList<>();
         JsonNode references = root.path("references");
         if (references.isArray() && !references.isEmpty()) {
@@ -327,6 +356,10 @@ public class LightRagClient {
             for (JsonNode ref : references) {
                 String refId = ref.path("reference_id").asText("");
                 String filePath = ref.path("file_path").asText("");
+                // 结果侧按命中库过滤：不属于任一目标 collection 的证据丢弃（丢弃项不占名次，保持保留项名次连续）
+                if (filterByCollection && !matchesCollection(filePath, collections)) {
+                    continue;
+                }
                 StringBuilder text = new StringBuilder();
                 JsonNode content = ref.path("content");
                 if (content.isArray()) {
@@ -344,27 +377,70 @@ public class LightRagClient {
                 if (StrUtil.isBlank(body)) {
                     continue;
                 }
+                // 从 file_path({collectionName}_{docId}) 解析归属 docId，让图谱证据与向量证据在文档层面对齐：
+                // 末端富化据此按 docId 补真实标题，并与同源向量证据聚合进同一文档块
+                String docId = parseDocId(filePath);
                 // 分数取按名次递减的中性分数 1/(rank+1)：无量纲，仅表达通道内相对顺序，
                 // 多通道时由 FusionPostProcessor(RRF) 重算，开启 Rerank 时由精排模型覆盖
                 chunks.add(RetrievedChunk.builder()
                         .id(StrUtil.isNotBlank(refId) ? refId : "graph:" + rank)
                         .text(body)
                         .score(1.0f / (rank + 1))
-                        .docName(StrUtil.isNotBlank(filePath) ? filePath : null)
+                        .docId(docId)
+                        // docId 解析到则留空 docName、交富化按 docId 补真实标题；解析不到才回退 file_path 以免完全无来源
+                        .docName(docId != null ? null : (StrUtil.isNotBlank(filePath) ? filePath : null))
                         .build());
                 rank++;
             }
             return chunks;
         }
         // 回退：references 关闭或为空时，用 response 上下文兜底为单个证据块
-        String context = root.path("response").asText("");
-        if (StrUtil.isNotBlank(context)) {
-            chunks.add(RetrievedChunk.builder()
-                    .id("graph:context")
-                    .text(context)
-                    .score(1.0f)
-                    .build());
+        // 过滤生效时该兜底块无 file_path、无法归属命中库，跳过以免破坏「意图定向」语义
+        if (!filterByCollection) {
+            String context = root.path("response").asText("");
+            if (StrUtil.isNotBlank(context)) {
+                chunks.add(RetrievedChunk.builder()
+                        .id("graph:context")
+                        .text(context)
+                        .score(1.0f)
+                        .build());
+            }
         }
         return chunks;
+    }
+
+    /**
+     * file_path 是否命中给定任一 collection
+     * <p>
+     * 按 {collectionName}_ 前缀 token 判断，与 deleteByCollection 同一 token 语义，抗服务端 file_path 归一化
+     */
+    private boolean matchesCollection(String filePath, Collection<String> collections) {
+        if (StrUtil.isBlank(filePath)) {
+            return false;
+        }
+        for (String collectionName : collections) {
+            if (StrUtil.isNotBlank(collectionName) && filePath.contains(collectionName + "_")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 从 file_path 解析归属 docId
+     * <p>
+     * 取最后一段连续数字：docId 为雪花纯数字且是 {collectionName}_{docId} 的末段，故为 file_path 中最后一个数字串；
+     * 无数字则返回 null（图谱证据退化为无 docId，仅影响文档聚合、不影响召回）
+     */
+    private String parseDocId(String filePath) {
+        if (StrUtil.isBlank(filePath)) {
+            return null;
+        }
+        Matcher matcher = DOC_ID_PATTERN.matcher(filePath);
+        String docId = null;
+        while (matcher.find()) {
+            docId = matcher.group(1);
+        }
+        return docId;
     }
 }

@@ -49,6 +49,13 @@ import java.util.List;
 public class GraphSearchChannel implements SearchChannel {
 
     private static final String MODE_INTENT = "intent";
+    private static final String MODE_GLOBAL = "global";
+
+    /**
+     * 过滤时向 LightRAG 的请求量上浮倍数
+     * 结果侧过滤在 top_k 截断后再筛掉跨库证据，命中库证据可能变少，过滤时多取以补召回
+     */
+    private static final int FILTER_TOPK_BOOST = 3;
 
     private final LightRagClient lightRagClient;
     private final GraphProperties graphProperties;
@@ -78,21 +85,29 @@ public class GraphSearchChannel implements SearchChannel {
     public SearchChannelResult search(SearchContext context) {
         long startTime = System.currentTimeMillis();
         try {
-            // intent 模式且无 KB 意图则跳过，语义与关键词通道一致
             String mode = properties.getChannels().getGraph().getMode();
-            if (MODE_INTENT.equalsIgnoreCase(mode) && !hasKbIntent(context)) {
+            List<String> intentCollections = extractIntentCollections(context);
+
+            // intent 模式且无可定向的 KB 意图库则跳过，语义与关键词通道一致
+            if (MODE_INTENT.equalsIgnoreCase(mode) && CollUtil.isEmpty(intentCollections)) {
                 log.info("图谱检索为 intent 模式但无 KB 意图，跳过");
                 return emptyResult(startTime);
             }
 
+            // 按 mode 决定过滤范围：global 不过滤（空）/ intent、both 有意图库则收敛到意图域，否则全局兜底（空）
+            List<String> collections = resolveCollections(mode, intentCollections);
+
             int topKMultiplier = properties.getChannels().getGraph().getTopKMultiplier();
-            int topK = context.getTopK() * Math.max(1, topKMultiplier);
+            int baseTopK = context.getTopK() * Math.max(1, topKMultiplier);
+            // 过滤生效时上浮请求量补召回；全局不过滤则用基础量
+            int topK = CollUtil.isEmpty(collections) ? baseTopK : baseTopK * FILTER_TOPK_BOOST;
             String queryMode = graphProperties.getLightrag().getQueryMode();
 
-            List<RetrievedChunk> chunks = lightRagClient.retrieve(context.getMainQuestion(), queryMode, topK);
+            List<RetrievedChunk> chunks = lightRagClient.retrieve(context.getMainQuestion(), queryMode, topK, collections);
 
             long latency = System.currentTimeMillis() - startTime;
-            log.info("图谱检索完成，检索到 {} 个证据，耗时 {}ms", chunks.size(), latency);
+            log.info("图谱检索完成，范围={}，检索到 {} 个证据，耗时 {}ms",
+                    CollUtil.isEmpty(collections) ? "全局" : collections, chunks.size(), latency);
 
             return SearchChannelResult.builder()
                     .channelType(SearchChannelType.GRAPH)
@@ -107,16 +122,27 @@ public class GraphSearchChannel implements SearchChannel {
     }
 
     /**
-     * 是否存在 KB 意图
+     * 按 mode 解析过滤范围
+     * global 不过滤（空）/ intent、both 直接用意图域（空则自然回退全局不过滤）
      */
-    private boolean hasKbIntent(SearchContext context) {
+    private List<String> resolveCollections(String mode, List<String> intentCollections) {
+        if (MODE_GLOBAL.equalsIgnoreCase(mode)) {
+            return List.of();
+        }
+        return intentCollections;
+    }
+
+    /**
+     * 从意图识别结果提取 KB 意图对应的 collection 名称
+     */
+    private List<String> extractIntentCollections(SearchContext context) {
         if (CollUtil.isEmpty(context.getIntents())) {
-            return false;
+            return List.of();
         }
         List<NodeScore> allScores = context.getIntents().stream()
                 .flatMap(si -> si.nodeScores().stream())
                 .toList();
-        return CollUtil.isNotEmpty(NodeScoreFilters.kb(allScores));
+        return NodeScoreFilters.kbCollections(allScores);
     }
 
     private SearchChannelResult emptyResult(long startTime) {
