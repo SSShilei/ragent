@@ -66,6 +66,11 @@ public class SearchChannelProperties {
          * 联网检索配置（You.com Search）
          */
         private WebSearch webSearch = new WebSearch();
+
+        /**
+         * 知识图谱检索配置
+         */
+        private Graph graph = new Graph();
     }
 
     @Data
@@ -148,6 +153,28 @@ public class SearchChannelProperties {
         /**
          * TopK 倍数
          * 关键词召回更多候选，后续通过融合与 Rerank 筛选
+         */
+        private int topKMultiplier = 2;
+    }
+
+    @Data
+    public static class Graph {
+
+        /**
+         * 是否启用
+         * 仅当开启图谱后端（rag.graph.type != none）时才会真正生效
+         */
+        private boolean enabled = false;
+
+        /**
+         * 检索范围
+         * intent 仅意图域 / global 全局图 / both 意图优先，无意图时全局兜底
+         */
+        private String mode = "both";
+
+        /**
+         * TopK 倍数
+         * 图谱召回实体/关系与来源分块，候选交由融合与 Rerank 精排
          */
         private int topKMultiplier = 2;
     }

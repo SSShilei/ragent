@@ -71,6 +71,17 @@ rag:
       analyzer: ik_max_word
       search-analyzer: ik_smart
 
+  graph:
+    type: lightrag  # 可选 none / lightrag；none 时不注册图谱检索通道与写入同步装饰器
+    lightrag:
+      base-url: http://127.0.0.1:9621
+      query-mode: mix  # naive / local / global / hybrid / mix
+      timeout-ms: 30000
+    embedding-model: qwen-emb-8b  # 与 LightRAG 的 SiliconFlow Qwen3-Embedding-8B 配置一致
+    ingestion:
+      async: true              # 标脏入队 + 后台防抖重建，不阻塞主写链路
+      global-workspace: false  # 跨库方案B（独立全局图）；默认关，Phase1 用 fan-out 兜底
+
   default:
     collection-name: rag_default_store
     dimension: 1536
@@ -130,6 +141,10 @@ rag:
       keyword:
         enabled: true
         mode: both
+        top-k-multiplier: 2
+      graph:
+        enabled: true
+        mode: both        # intent 仅意图域 / global 全局图 / both 意图优先，无意图时全局兜底
         top-k-multiplier: 2
       web-search:
         enabled: false
