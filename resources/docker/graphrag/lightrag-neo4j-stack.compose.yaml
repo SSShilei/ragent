@@ -12,13 +12,18 @@ name: lightrag-neo4j-stack
 services:
   neo4j:
     container_name: neo4j
-    image: neo4j:5.26-community
+    # GDS 固定进本地镜像，避免官方插件安装器在每次重启时重新联网下载 62 MB JAR
+    image: ragent/neo4j-gds:5.26-2.13.11
+    build:
+      context: .
+      dockerfile: neo4j-gds.Dockerfile
     ports:
       - "7474:7474"   # HTTP Browser
       - "7687:7687"   # Bolt
     environment:
       NEO4J_AUTH: "${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}"
-      NEO4J_PLUGINS: '["apoc","graph-data-science"]'   # GDS 社区版含 Leiden/Louvain（单机 4 核封顶）
+      # APOC 已随 Neo4j 镜像提供；GDS 由 neo4j-gds.Dockerfile 固定，不再放入此运行时下载列表
+      NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*,gds.*"
       NEO4J_server_memory_heap_max__size: "1G"
       NEO4J_server_memory_pagecache_size: "512m"

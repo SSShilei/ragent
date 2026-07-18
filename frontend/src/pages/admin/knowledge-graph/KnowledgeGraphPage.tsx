@@ -46,32 +46,104 @@ const FALLBACK_COLOR = "#94A3B8";
 // 概览时常显标签的目标数量：按度数取前 ~45 个高连接实体常显，密集图自动抬高门槛以压掉大范围文字遮挡，其余悬浮查看
 const LABEL_BUDGET = 45;
 
-// 连线样式变体：稠密图里边易喧宾夺主（满屏都是线），故让线退成节点背后的网。各变体只差描边色 / 透明度 / 线宽 / 虚实 / 概览箭头，
-// 聚焦某节点时统一由 flow 态点亮着色 + 显方向。运行期切换走 updateEdgeData + draw（只重绘、不重排布局）
-type EdgeVariant = "faint" | "mist" | "dashed" | "arrow" | "hidden";
-const EDGE_VARIANTS: Record<
-  EdgeVariant,
-  {
-    stroke: string;
-    opacity: number;
-    lineWidth: number;
-    lineDash: number | number[];
-    endArrow: boolean;
+// 边「淡网」：低透明度冷灰、让线退成节点背后的网。稠密图里边一花就毁整屏
+const EDGE_STROKE = "#CBD5E1";
+const EDGE_OPACITY = 0.34;
+// 曲线控制点偏移：曲线态用 20、直线态用 0（改 curveOffset 即可拉直，无需换边类型 / 重排）
+const EDGE_CURVE_OFFSET = 20;
+// 连线形状 / 箭头：模块级单例，齿轮设置面板可切；曲线=贝塞尔(offset 20)、直线=offset 0；淡箭头=概览显小号 simple 箭头。默认 直线 + 淡箭头
+let edgeCurved = false;
+let edgeArrow = true;
+
+// 节点视觉主题：稠密的饱和大圆点像「打翻的糖果罐」，靠缩小叶子拉层级 + 弱化色块 + 砍光晕，收成耐看的「星座网」。
+// pastel 柔彩（提亮粉彩填充）｜ outline 描边（近白填充 + 类型色圆环，色只作点缀）｜ glass 玻璃（半透明色填充）｜ vivid 鲜彩（原样）
+type VizTheme = "pastel" | "outline" | "glass" | "vivid";
+// 当前视觉主题：模块级单例，renderGraph 节点样式与齿轮设置面板都读它；默认「描边」
+let vizTheme: VizTheme = "outline";
+
+/** 两个 #RRGGBB 按 t∈[0,1] 线性混合，返回 #rrggbb；非法输入回退 a。用于主题提亮粉彩 / 描边近白填充 */
+function mixHex(a: string, b: string, t: number): string {
+  const pa = /^#?([0-9a-fA-F]{6})$/.exec(a.trim());
+  const pb = /^#?([0-9a-fA-F]{6})$/.exec(b.trim());
+  if (!pa || !pb) {
+    return a;
   }
-> = {
-  // 淡网：低透明度冷灰实线、概览关箭头——线成若隐若现的网，视觉重心回到彩色节点
-  faint: { stroke: "#CBD5E1", opacity: 0.38, lineWidth: 1, lineDash: 0, endArrow: false },
-  // 薄雾：更淡，几近隐入背景
-  mist: { stroke: "#D6DEE8", opacity: 0.2, lineWidth: 1, lineDash: 0, endArrow: false },
-  // 细虚线：虚线比实线更轻盈、更少「缠绕」的实心感
-  dashed: { stroke: "#C2CCDA", opacity: 0.5, lineWidth: 1, lineDash: [4, 5], endArrow: false },
-  // 淡线带向：想在概览就看到方向的话，保留小箭头但整体压淡
-  arrow: { stroke: "#C7D0E0", opacity: 0.45, lineWidth: 1, lineDash: 0, endArrow: true },
-  // 近隐：概览几乎不画边，点某节点才亮出其关系线（最干净的「星图」观感）
-  hidden: { stroke: "#CBD5E1", opacity: 0.06, lineWidth: 1, lineDash: 0, endArrow: false }
-};
-// 当前连线样式：模块级单例，renderGraph 建边样式与页面「连线切换器」都读它；默认「淡网」
-let edgeVariant: EdgeVariant = "faint";
+  const ia = parseInt(pa[1], 16);
+  const ib = parseInt(pb[1], 16);
+  const r = Math.round(((ia >> 16) & 255) + (((ib >> 16) & 255) - ((ia >> 16) & 255)) * t);
+  const g = Math.round(((ia >> 8) & 255) + (((ib >> 8) & 255) - ((ia >> 8) & 255)) * t);
+  const b2 = Math.round((ia & 255) + ((ib & 255) - (ia & 255)) * t);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b2).toString(16).slice(1)}`;
+}
+
+/**
+ * 主题化节点完整样式：一次给出 尺寸 / 填充 / 填充透明度 / 描边 / 描边宽 / 光晕。
+ * 非 vivid 主题统一把叶子缩小到 13 起、拉开层级、腾出留白；各主题再各自弱化色块（提亮 / 描边 / 半透明）与光晕
+ */
+function themeNodeStyle(
+  theme: VizTheme,
+  baseColor: string,
+  degree: number
+): {
+  size: number;
+  fill: string;
+  fillOpacity: number;
+  stroke: string;
+  lineWidth: number;
+  shadowColor: string;
+  shadowBlur: number;
+} {
+  const d = Math.min(degree, 12);
+  const isHub = degree >= 6;
+  if (theme === "vivid") {
+    // 原样：饱和填充、白环、强光晕、大节点
+    return {
+      size: 24 + d * 3,
+      fill: baseColor,
+      fillOpacity: 1,
+      stroke: "#ffffff",
+      lineWidth: isHub ? 2 : 1.5,
+      shadowColor: withAlpha(baseColor, 0.45),
+      shadowBlur: 16
+    };
+  }
+  const size = 13 + d * 3;
+  if (theme === "outline") {
+    // 近白填充 + 类型色圆环：色只作点缀不再成片，最能压住「太花」又保留类型区分
+    return {
+      size,
+      fill: mixHex(baseColor, "#ffffff", 0.86),
+      fillOpacity: 1,
+      stroke: baseColor,
+      lineWidth: isHub ? 2.5 : 1.8,
+      shadowColor: withAlpha(baseColor, 0.14),
+      shadowBlur: 4
+    };
+  }
+  if (theme === "glass") {
+    // 半透明色填充 + 白环：像磨砂玻璃、交叠处透色，更轻
+    return {
+      size,
+      fill: baseColor,
+      fillOpacity: 0.5,
+      stroke: "#ffffff",
+      lineWidth: 1.25,
+      shadowColor: withAlpha(baseColor, 0.3),
+      shadowBlur: 12
+    };
+  }
+  // pastel 柔彩：向白提亮成粉彩、白环、柔光
+  const soft = mixHex(baseColor, "#ffffff", 0.5);
+  return {
+    size,
+    fill: soft,
+    fillOpacity: 1,
+    stroke: "#ffffff",
+    lineWidth: isHub ? 2 : 1.5,
+    shadowColor: withAlpha(soft, 0.34),
+    shadowBlur: 10
+  };
+}
 
 // 实体类型英中映射，LightRAG 抽取出的类型多为英文，展示时转中文，未收录的类型回退原始串
 const ENTITY_TYPE_LABELS: Record<string, string> = {
@@ -411,10 +483,10 @@ function snapEntranceToBase() {
   }
   for (const item of entranceEdges) {
     try {
-      // 边回到「当前变体」的静息透明度与虚实（而非写死 1/实线），否则会盖掉淡网基线、让边重新变实变浓
-      item.style.opacity = EDGE_VARIANTS[edgeVariant].opacity;
+      // 边回到淡网静息透明度与实线（而非写死 1），否则会盖掉淡网基线、让边重新变实变浓
+      item.style.opacity = EDGE_OPACITY;
       if (item.key) {
-        item.key.style.lineDash = EDGE_VARIANTS[edgeVariant].lineDash;
+        item.key.style.lineDash = 0;
         item.key.style.lineDashOffset = 0;
       }
     } catch {
@@ -489,8 +561,8 @@ function runEntrance(graph: Graph, onDone: () => void) {
     el.setLocalScale(ENTRANCE_NODE_SCALE_FROM);
     entranceNodes.push({ el, delay: nodeDelay[id] });
   }
-  // 边的静息透明度取当前变体（淡网默认 0.38）：grow 期间边即以此透明度可见、揭示交给 lineDash；回退淡入则渐入到此值
-  const edgeOpacity = EDGE_VARIANTS[edgeVariant].opacity;
+  // 边的静息透明度（淡网 0.34）：grow 期间边即以此透明度可见、揭示交给 lineDash；回退淡入则渐入到此值
+  const edgeOpacity = EDGE_OPACITY;
   for (const datum of graph.getEdgeData()) {
     const el = canvas.document.getElementById(String(datum.id)) as unknown as {
       style: { opacity?: number };
@@ -797,25 +869,56 @@ function startAmbient(graph: Graph) {
 }
 
 /**
- * 运行期切换连线样式：把变体写进所有边的数据样式并 draw（只重绘、不重排布局，节点不动）。
- * draw 会重建边图形，故先停 hub 涟漪与常态微动、draw 后再重建，避免它们直接改的图元被 draw 波及
+ * 运行期切换视觉主题：改模块量 vizTheme，再 updateNodeData 把节点标记为脏以触发 draw 重跑样式映射（映射按 live vizTheme 现算、
+ * 才是真正决定最终样式者；updateNodeData 的 style 载荷只为标脏、与映射同值）。只重绘不重排、节点不动。
+ * 同步刷新 hub 涟漪的半径与颜色以贴合新尺寸；draw 会重建图元，故先停涟漪与微动、draw 后再重建，避免其直接改的图元被 draw 波及
  */
-function applyEdgeVariant(graph: Graph, variant: EdgeVariant) {
-  edgeVariant = variant;
-  const spec = EDGE_VARIANTS[variant];
+function applyTheme(graph: Graph, theme: VizTheme) {
+  vizTheme = theme;
+  stopEdgeFlow();
+  stopAmbient();
+  stopHubRipple();
+  graph.updateNodeData(
+    graph.getNodeData().map((node) => ({
+      id: String(node.id),
+      style: {
+        ...themeNodeStyle(
+          theme,
+          String(node.data?.baseColor ?? FALLBACK_COLOR),
+          Number(node.data?.degree ?? 0)
+        )
+      }
+    }))
+  );
+  // 涟漪半径 / 颜色贴合主题化后的新尺寸与新填充
+  for (const spec of hubRippleSpec) {
+    const datum = graph.getNodeData(spec.id);
+    const s = themeNodeStyle(
+      theme,
+      String(datum?.data?.baseColor ?? FALLBACK_COLOR),
+      Number(datum?.data?.degree ?? 0)
+    );
+    spec.baseR = s.size / 2;
+    spec.color = s.fill;
+  }
+  void graph.draw().then(() => {
+    buildHubRipple(graph);
+    startAmbient(graph);
+  });
+}
+
+/**
+ * 运行期切换连线形状 / 箭头：模块量 edgeCurved/edgeArrow 由 handler 改好，再 updateEdgeData 把边标记为脏以触发 draw 重跑样式映射
+ * （curveOffset/endArrow 映射按 live 模块量现算，0=直线）。只重绘不重排。同 applyTheme：draw 前后停 / 重建涟漪与微动
+ */
+function applyEdgeLook(graph: Graph) {
   stopEdgeFlow();
   stopAmbient();
   stopHubRipple();
   graph.updateEdgeData(
     graph.getEdgeData().map((edge) => ({
       id: String(edge.id),
-      style: {
-        stroke: spec.stroke,
-        opacity: spec.opacity,
-        lineWidth: spec.lineWidth,
-        lineDash: spec.lineDash,
-        endArrow: spec.endArrow
-      }
+      style: { curveOffset: edgeCurved ? EDGE_CURVE_OFFSET : 0, endArrow: edgeArrow }
     }))
   );
   void graph.draw().then(() => {
@@ -906,8 +1009,10 @@ export function KnowledgeGraphPage() {
   const [activeEntity, setActiveEntity] = useState<string>("");
   const [focusName, setFocusName] = useState<string>("");
   const [zoomPct, setZoomPct] = useState(100);
-  // 临时·连线样式切换器当前选中项（现场挑边样式用，选定后连同切换器一并删除）
-  const [edgeVariantState, setEdgeVariantState] = useState<EdgeVariant>("faint");
+  // 视觉设置：主题 / 连线形状 / 箭头，置于齿轮设置面板；默认 描边 + 直线 + 淡箭头
+  const [vizThemeState, setVizThemeState] = useState<VizTheme>("outline");
+  const [edgeCurvedState, setEdgeCurvedState] = useState(false);
+  const [edgeArrowState, setEdgeArrowState] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   // 布局类型：力导（默认、工作视图）/ concentric 径向分层（展示视图）；经 ref 供 renderGraph 空依赖闭包读取
@@ -970,16 +1075,19 @@ export function KnowledgeGraphPage() {
     const labelMinDegree =
       sortedDegrees.length > LABEL_BUDGET ? Math.max(sortedDegrees[LABEL_BUDGET], 1) : 0;
     // 常态涟漪的核心实体：取度数最高、且达「核心」门槛（deg>=6，与描边 / 标签加粗同一档）的至多 4 个作为脉动对象
-    // 小图或无高连接实体时自然为空、不做涟漪；color / baseR 对齐节点填充色与视觉半径，让光环从节点边缘向外扩散
+    // 小图或无高连接实体时自然为空、不做涟漪；color / baseR 对齐主题化后的节点填充与视觉半径，让光环从节点边缘向外扩散
     hubRippleSpec = [...data.nodes]
       .filter((node) => (degree[node.id] || 0) >= 6)
       .sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0))
       .slice(0, 4)
-      .map((node) => ({
-        id: node.id,
-        color: colors[node.type?.trim() || ""] || FALLBACK_COLOR,
-        baseR: (24 + Math.min(degree[node.id] || 0, 12) * 3) / 2
-      }));
+      .map((node) => {
+        const s = themeNodeStyle(
+          vizTheme,
+          colors[node.type?.trim() || ""] || FALLBACK_COLOR,
+          degree[node.id] || 0
+        );
+        return { id: node.id, color: s.fill, baseR: s.size / 2 };
+      });
     // 节点 id→名称映射，供边悬浮展示「实体A → 实体B」
     const nameById: Record<string, string> = {};
     for (const node of data.nodes) {
@@ -992,7 +1100,9 @@ export function KnowledgeGraphPage() {
         name: node.name,
         type: node.type || "",
         description: node.description || "",
-        degree: degree[node.id] || 0
+        degree: degree[node.id] || 0,
+        // 该节点的「类型原色」，供主题化（提亮 / 描边 / 半透明）与运行期切主题时重算样式
+        baseColor: colors[node.type?.trim() || ""] || FALLBACK_COLOR
       }
     }));
     // 边 id 加前缀与节点 id 去重：LightRAG 的节点/边 id 是两套独立整数序列会大量重叠，
@@ -1010,6 +1120,14 @@ export function KnowledgeGraphPage() {
     }));
 
     const graphData: GraphData = { nodes, edges };
+
+    // 每次调用都按「当前 vizTheme」现算该节点主题化样式；draw() 会重新执行样式映射，故切主题只需改 vizTheme + draw 即生效
+    const styleOf = (d: NodeData) =>
+      themeNodeStyle(
+        vizTheme,
+        String(d.data?.baseColor ?? FALLBACK_COLOR),
+        Number(d.data?.degree ?? 0)
+      );
 
     const graph = new Graph({
       container,
@@ -1046,15 +1164,16 @@ export function KnowledgeGraphPage() {
             },
       node: {
         style: {
-          size: (d: NodeData) => 24 + Math.min(Number(d.data?.degree ?? 0), 12) * 3,
-          fill: (d: NodeData) => colors[String(d.data?.type ?? "")] || FALLBACK_COLOR,
-          stroke: "#ffffff",
-          // 度数越高白环越厚，核心实体浮起感更强
-          lineWidth: (d: NodeData) => (Number(d.data?.degree ?? 0) >= 6 ? 2 : 1.5),
-          // 同色柔光光晕：取该节点填充色的半透明版、居中不偏移，随类型配色统一；淡出态靠 opacity 一并变淡
-          shadowColor: (d: NodeData) =>
-            withAlpha(colors[String(d.data?.type ?? "")] || FALLBACK_COLOR, 0.45),
-          shadowBlur: 16,
+          // 尺寸 / 填充 / 填充透明度 / 描边 / 光晕统一按当前视觉主题现算（styleOf 读 live vizTheme）：
+          // 非 vivid 主题缩小叶子拉层级、弱化色块（提亮 / 描边 / 半透明）、砍光晕，整图从「糖果罐」收成「星座网」
+          size: (d: NodeData) => styleOf(d).size,
+          fill: (d: NodeData) => styleOf(d).fill,
+          fillOpacity: (d: NodeData) => styleOf(d).fillOpacity,
+          stroke: (d: NodeData) => styleOf(d).stroke,
+          lineWidth: (d: NodeData) => styleOf(d).lineWidth,
+          // 同色柔光光晕：色/强度由主题决定（描边主题最弱、鲜彩最强），居中不偏移
+          shadowColor: (d: NodeData) => styleOf(d).shadowColor,
+          shadowBlur: (d: NodeData) => styleOf(d).shadowBlur,
           shadowOffsetX: 0,
           shadowOffsetY: 0,
           // 显式声明 opacity / labelOpacity 基线：G6 v5 清状态只回退到基础样式里已声明的键，缺省会让散焦后停在 inactive 的淡出值不复原
@@ -1092,16 +1211,17 @@ export function KnowledgeGraphPage() {
         // 直线改二次贝塞尔曲线，中心辐射状的图更舒展，双向 / 平行关系也不再完全重叠
         type: "quadratic",
         style: {
-          // 描边色 / 线宽 / 概览箭头 / 透明度 / 虚实统一取当前连线变体：稠密图默认「淡网」让线退成节点背后的网。
-          // 这些键都显式声明，既是变体基线、也保证聚焦态覆盖后清态能回退（G6 v5 清态只回退 base 已声明的键）；
-          // endArrow 用 simple 开口箭头（多数变体概览关掉、方向留给聚焦）
-          stroke: EDGE_VARIANTS[edgeVariant].stroke,
-          lineWidth: EDGE_VARIANTS[edgeVariant].lineWidth,
-          endArrow: EDGE_VARIANTS[edgeVariant].endArrow,
+          // 淡网基线：低透明度冷灰。形状与箭头可现场切——curveOffset 控制曲/直（0=直线）、endArrow 控制概览是否显淡箭头。
+          // 这些键都显式声明，保证聚焦态覆盖后清态能回退（G6 v5 清态只回退 base 已声明的键）
+          stroke: EDGE_STROKE,
+          lineWidth: 1,
+          // 函数读 live edgeCurved/edgeArrow：draw() 会重新执行样式映射，故切曲/直、切箭头只需改模块量 + draw 即生效
+          curveOffset: () => (edgeCurved ? EDGE_CURVE_OFFSET : 0),
+          endArrow: () => edgeArrow,
           endArrowType: "simple",
-          endArrowSize: 8,
-          opacity: EDGE_VARIANTS[edgeVariant].opacity,
-          lineDash: EDGE_VARIANTS[edgeVariant].lineDash
+          endArrowSize: 6,
+          opacity: EDGE_OPACITY,
+          lineDash: 0
         },
         // 边不再常显英文标签（关系文案移入悬浮提示）
         state: {
@@ -1455,14 +1575,29 @@ export function KnowledgeGraphPage() {
     }
   };
 
-  // 临时·连线样式切换器：现场以某个边样式重绘供挑选对比；选定后我会删掉切换器、把选中项固化为默认
-  const handlePickEdge = (variant: EdgeVariant) => {
-    setEdgeVariantState(variant);
+  // 视觉设置切换：改主题 / 连线形状 / 箭头即时重绘（只重绘、不重排）
+  const handlePickTheme = (theme: VizTheme) => {
+    setVizThemeState(theme);
     const graph = graphRef.current;
-    if (!graph) {
-      return;
+    if (graph) {
+      applyTheme(graph, theme);
     }
-    applyEdgeVariant(graph, variant);
+  };
+  const handlePickEdgeCurved = (curved: boolean) => {
+    setEdgeCurvedState(curved);
+    edgeCurved = curved;
+    const graph = graphRef.current;
+    if (graph) {
+      applyEdgeLook(graph);
+    }
+  };
+  const handlePickEdgeArrow = (arrow: boolean) => {
+    setEdgeArrowState(arrow);
+    edgeArrow = arrow;
+    const graph = graphRef.current;
+    if (graph) {
+      applyEdgeLook(graph);
+    }
   };
 
   // 拉某知识库的文档列表，供二级范围选择
@@ -1672,6 +1807,83 @@ export function KnowledgeGraphPage() {
             {settingsOpen ? (
               <div className="absolute right-0 top-full z-20 mt-2 w-56 space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
                 <div>
+                  <div className="mb-1.5 text-xs font-medium text-slate-500">主题</div>
+                  <div className="flex gap-1">
+                    {(
+                      [
+                        { key: "outline", label: "描边" },
+                        { key: "pastel", label: "柔彩" },
+                        { key: "glass", label: "玻璃" },
+                        { key: "vivid", label: "鲜彩" }
+                      ] as Array<{ key: VizTheme; label: string }>
+                    ).map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => handlePickTheme(opt.key)}
+                        className={cn(
+                          "flex-1 rounded-lg border py-1 text-sm transition",
+                          vizThemeState === opt.key
+                            ? "border-indigo-500 bg-indigo-50 text-indigo-600"
+                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-1.5 text-xs font-medium text-slate-500">连线</div>
+                  <div className="flex gap-1">
+                    {(
+                      [
+                        { curved: false, label: "直线" },
+                        { curved: true, label: "曲线" }
+                      ] as Array<{ curved: boolean; label: string }>
+                    ).map((opt) => (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => handlePickEdgeCurved(opt.curved)}
+                        className={cn(
+                          "flex-1 rounded-lg border py-1 text-sm transition",
+                          edgeCurvedState === opt.curved
+                            ? "border-indigo-500 bg-indigo-50 text-indigo-600"
+                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-1.5 text-xs font-medium text-slate-500">箭头</div>
+                  <div className="flex gap-1">
+                    {(
+                      [
+                        { arrow: true, label: "淡" },
+                        { arrow: false, label: "无" }
+                      ] as Array<{ arrow: boolean; label: string }>
+                    ).map((opt) => (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => handlePickEdgeArrow(opt.arrow)}
+                        className={cn(
+                          "flex-1 rounded-lg border py-1 text-sm transition",
+                          edgeArrowState === opt.arrow
+                            ? "border-indigo-500 bg-indigo-50 text-indigo-600"
+                            : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
                   <div className="mb-1.5 text-xs font-medium text-slate-500">布局</div>
                   <div className="flex gap-1">
                     {[
@@ -1751,36 +1963,6 @@ export function KnowledgeGraphPage() {
         <div className="absolute right-4 top-4 z-10 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs text-slate-500 shadow-sm backdrop-blur">
           {stats.nodes} 实体 · {stats.edges} 关系
           {view?.truncated ? <span className="text-amber-600"> · 已截断</span> : null}
-        </div>
-      ) : null}
-
-      {/* 临时·连线样式切换器：现场挑边样式用，点按钮即以该样式重绘（不重排）；挑定后连同此控件一并删除 */}
-      {view && !isEmpty && !errorMsg && !loading ? (
-        <div className="absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white/90 p-1 text-xs shadow-sm backdrop-blur">
-          <span className="pl-2 pr-1 text-slate-400">连线</span>
-          {(
-            [
-              { key: "faint", label: "淡网" },
-              { key: "mist", label: "薄雾" },
-              { key: "dashed", label: "虚线" },
-              { key: "arrow", label: "带箭头" },
-              { key: "hidden", label: "近隐" }
-            ] as Array<{ key: EdgeVariant; label: string }>
-          ).map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => handlePickEdge(opt.key)}
-              className={cn(
-                "rounded-full px-2.5 py-1 transition",
-                edgeVariantState === opt.key
-                  ? "bg-indigo-500 text-white"
-                  : "text-slate-600 hover:bg-slate-100"
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
         </div>
       ) : null}
 
