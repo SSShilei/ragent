@@ -31,7 +31,7 @@ import com.nageoffer.ai.ragent.rag.core.memory.ConversationMemoryService;
 import com.nageoffer.ai.ragent.rag.core.prompt.PromptContext;
 import com.nageoffer.ai.ragent.rag.core.prompt.PromptTemplateLoader;
 import com.nageoffer.ai.ragent.rag.core.prompt.RAGPromptService;
-import com.nageoffer.ai.ragent.rag.core.retrieve.RetrievalEngine;
+import com.nageoffer.ai.ragent.rag.core.retrieval.RetrievalEngine;
 import com.nageoffer.ai.ragent.rag.core.rewrite.QueryRewriteService;
 import com.nageoffer.ai.ragent.rag.core.rewrite.RewriteResult;
 import com.nageoffer.ai.ragent.rag.dto.IntentGroup;
