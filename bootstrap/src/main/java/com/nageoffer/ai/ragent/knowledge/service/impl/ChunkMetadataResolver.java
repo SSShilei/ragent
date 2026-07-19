@@ -94,4 +94,28 @@ public class ChunkMetadataResolver {
         }
         return result;
     }
+
+    /**
+     * 按 docId 批量解析文档标题
+     * <p>
+     * 供图谱等在 {@code t_knowledge_chunk} 无对应行、但已带归属 docId 的证据补真实文档标题，
+     * 使其与同源向量证据在上下文里聚合进同一文档块
+     *
+     * @param docIds 文档 ID 集合
+     * @return docId 到文档标题的映射 未命中的不出现在结果中
+     */
+    public Map<String, String> resolveDocNames(Collection<String> docIds) {
+        if (CollUtil.isEmpty(docIds)) {
+            return Map.of();
+        }
+        Set<String> distinctIds = docIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toSet());
+        if (distinctIds.isEmpty()) {
+            return Map.of();
+        }
+        return documentMapper.selectByIds(distinctIds).stream()
+                .filter(doc -> doc.getId() != null && doc.getDocName() != null)
+                .collect(Collectors.toMap(KnowledgeDocumentDO::getId, KnowledgeDocumentDO::getDocName, (a, b) -> a));
+    }
 }
