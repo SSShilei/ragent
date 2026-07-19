@@ -48,14 +48,10 @@ public class SearchChannelProperties {
     public static class Channels {
 
         /**
-         * 向量全局检索配置
+         * 向量检索配置
+         * 一条向量通道，按 KB 意图置信度在通道内二选一作用域，意图定向与全局子配置各管一路
          */
-        private VectorGlobal vectorGlobal = new VectorGlobal();
-
-        /**
-         * 意图定向检索配置
-         */
-        private IntentDirected intentDirected = new IntentDirected();
+        private Vector vector = new Vector();
 
         /**
          * 关键词检索配置
@@ -74,58 +70,33 @@ public class SearchChannelProperties {
     }
 
     @Data
-    public static class VectorGlobal {
+    public static class Vector {
 
         /**
          * 是否启用
+         * 一条向量通道一个总开关；关闭即全站无向量召回
          */
         private boolean enabled = true;
 
         /**
-         * 意图置信度阈值
-         * 当意图识别的最高分数低于此阈值时，启用全局检索
+         * 意图定向子配置
+         * 有足够置信的 KB 意图时，收窄到命中库检索这一路的参数
          */
-        private double confidenceThreshold = 0.6;
+        private IntentDirected intentDirected = new IntentDirected();
 
         /**
-         * 单意图补充检索阈值
-         * 当仅识别出一个意图且分数低于此阈值时，启用全局检索作为安全网
+         * 全局子配置
+         * 无 / 低置信 KB 意图时，退化为全库检索这一路的参数
          */
-        private double singleIntentSupplementThreshold = 0.8;
-
-        /**
-         * TopK 倍数
-         * 仅逐库并行 fan-out 兜底路径（如 Milvus）使用，每库召回 topK * 倍数
-         */
-        private int topKMultiplier = 3;
-
-        /**
-         * 全局检索候选预算
-         * 单次全局查询的 LIMIT 上限，与 fusion.rerankCandidateLimit 配合控制候选规模
-         * <=0 时回退到 topK * topKMultiplier 的旧语义
-         */
-        private int candidateBudget = 100;
-
-        /**
-         * 解析全局检索候选预算
-         * 优先使用绝对预算 candidateBudget；未配置（<=0）时回退到 topK * topKMultiplier
-         */
-        public int resolveCandidateBudget(int topK) {
-            return candidateBudget > 0 ? candidateBudget : topK * Math.max(1, topKMultiplier);
-        }
+        private Global global = new Global();
     }
 
     @Data
     public static class IntentDirected {
 
         /**
-         * 是否启用
-         */
-        private boolean enabled = true;
-
-        /**
          * 最低意图分数
-         * 低于此分数的意图节点会被过滤
+         * 低于此分数的意图节点会被过滤，不参与「是否收窄作用域」的判定
          */
         private double minIntentScore = 0.4;
 
@@ -133,6 +104,37 @@ public class SearchChannelProperties {
          * TopK 倍数
          */
         private int topKMultiplier = 2;
+    }
+
+    @Data
+    public static class Global {
+
+        /**
+         * 意图置信度阈值
+         * KB 意图最高分低于此阈值时，通道退化为全库检索
+         */
+        private double confidenceThreshold = 0.6;
+
+        /**
+         * 单意图补充检索阈值
+         * 仅识别出一个 KB 意图且分数低于此阈值时，通道退化为全库检索作为安全网
+         */
+        private double singleIntentSupplementThreshold = 0.8;
+
+        /**
+         * 全局检索候选预算
+         * 全局作用域取数的唯一旋钮：单次跨库查询的 LIMIT 上限（fan-out 兜底路径下为每库上限），
+         * 与 fusion.rerankCandidateLimit 配合控制候选规模；<=0 时回退到 topK
+         */
+        private int candidateBudget = 100;
+
+        /**
+         * 解析全局检索候选预算
+         * 优先使用绝对预算 candidateBudget；未配置（<=0）时回退到 topK
+         */
+        public int resolveCandidateBudget(int topK) {
+            return candidateBudget > 0 ? candidateBudget : topK;
+        }
     }
 
     @Data
@@ -249,14 +251,10 @@ public class SearchChannelProperties {
     public static class ChannelWeights {
 
         /**
-         * 意图定向（向量精查命中库）权重 最可信
+         * 向量权重
+         * 向量模态最可信；意图定向与全局同属这一条通道，共用一个权重
          */
-        private double intentDirected = 1.0;
-
-        /**
-         * 向量全局（跨库兜底）权重
-         */
-        private double vectorGlobal = 1.0;
+        private double vector = 1.0;
 
         /**
          * 关键词（BM25）权重

@@ -23,16 +23,11 @@ package com.nageoffer.ai.ragent.rag.core.retrieve.channel;
 public enum SearchChannelType {
 
     /**
-     * 向量全局检索
-     * 在所有知识库中进行向量检索
+     * 向量检索
+     * 一条向量模态通道，按 KB 意图置信度在通道内决定作用域：
+     * 有足够置信的 KB 意图时收窄到命中库（意图定向），否则退化为全库检索（全局）
      */
-    VECTOR_GLOBAL,
-
-    /**
-     * 意图定向检索
-     * 基于意图识别结果，在特定知识库中检索
-     */
-    INTENT_DIRECTED,
+    VECTOR,
 
     /**
      * 关键词检索

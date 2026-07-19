@@ -131,14 +131,15 @@ rag:
 
   search:
     channels:
-      vector-global:
-        confidence-threshold: 0.6
-        top-k-multiplier: 3
-        candidate-budget: 100
-      intent-directed:
-        enabled: true
-        min-intent-score: 0.4
-        top-k-multiplier: 2
+      vector:
+        enabled: true       # 向量通道总开关；意图定向与全局是同一通道按意图置信度内部二选一的两种作用域
+        intent-directed:    # 有足够置信的 KB 意图时，收窄到命中库检索
+          min-intent-score: 0.4
+          top-k-multiplier: 2
+        global:             # 无 / 低置信 KB 意图时，退化为全库检索兜底
+          confidence-threshold: 0.6              # KB 意图最高分低于此值 → 走全局作用域
+          single-intent-supplement-threshold: 0.8  # 仅单个 KB 意图且分数低于此值 → 走全局作用域兜底
+          candidate-budget: 60                   # 全局作用域取数上限（单一旋钮）
       keyword:
         enabled: false
         mode: both
@@ -157,8 +158,7 @@ rag:
       rrf-k: 20                   # 候选池通常仅 20~40 条，k=60 会过度平滑名次；调低至 20 让头部更有区分度（配合「检索归因」日志校准）
       rerank-candidate-limit: 40  # RRF 融合后送入 Rerank 的候选上限，<=0 不截断（经验值 40~100）
       channel-weights:            # 各通道 RRF 贡献权重：向量最可信=1.0；图谱为新通道、跑在全局图上、证据仅经结果侧过滤，暂降权=0.5
-        intent-directed: 1.0
-        vector-global: 1.0
+        vector: 1.0
         keyword: 1.0
         graph: 0.5
         web-search: 0.5

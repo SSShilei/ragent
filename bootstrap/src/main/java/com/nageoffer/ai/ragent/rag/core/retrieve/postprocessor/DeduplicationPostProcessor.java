@@ -109,14 +109,13 @@ public class DeduplicationPostProcessor implements SearchResultPostProcessor {
 
     /**
      * 获取通道优先级（数字越小优先级越高）
-     * 与各通道 getPriority() 的相对次序保持一致：意图定向 < 图谱 < 关键词 < 向量全局
+     * 与各通道 getPriority() 的相对次序保持一致：向量 < 图谱 < 关键词
      */
     private int getChannelPriority(SearchChannelType type) {
         return switch (type) {
-            case INTENT_DIRECTED -> 1;   // 意图检索优先级最高
-            case GRAPH -> 2;             // 图谱检索次之
-            case KEYWORD -> 3;           // 关键词检索再次
-            case VECTOR_GLOBAL -> 4;     // 全局检索最低
+            case VECTOR -> 1;    // 向量为主路，去重占先
+            case GRAPH -> 2;     // 图谱检索次之
+            case KEYWORD -> 3;   // 关键词检索再次
             default -> 99;
         };
     }

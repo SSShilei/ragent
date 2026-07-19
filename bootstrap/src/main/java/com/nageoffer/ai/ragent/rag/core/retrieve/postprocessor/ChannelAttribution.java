@@ -120,8 +120,7 @@ final class ChannelAttribution {
      */
     static String label(SearchChannelType type) {
         return switch (type) {
-            case INTENT_DIRECTED -> "意图定向";
-            case VECTOR_GLOBAL -> "向量全局";
+            case VECTOR -> "向量";
             case KEYWORD -> "关键词";
             case GRAPH -> "图谱";
             case WEB_SEARCH -> "联网";

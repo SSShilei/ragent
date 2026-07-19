@@ -159,8 +159,7 @@ public class FusionPostProcessor implements SearchResultPostProcessor {
     private double weightOf(SearchChannelType type) {
         SearchChannelProperties.ChannelWeights w = properties.getFusion().getChannelWeights();
         return switch (type) {
-            case INTENT_DIRECTED -> w.getIntentDirected();
-            case VECTOR_GLOBAL -> w.getVectorGlobal();
+            case VECTOR -> w.getVector();
             case KEYWORD -> w.getKeyword();
             case GRAPH -> w.getGraph();
             case WEB_SEARCH -> w.getWebSearch();
