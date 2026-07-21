@@ -681,6 +681,215 @@ mcpBatchExecutor, ragContextExecutor, ragRetrievalExecutor, intentClassifyExecut
 
 ---
 
+---
+
+## 十八、意图识别策略树与 Agent 流转机制
+
+### 18.1 意图树的物理结构
+
+意图树用 **邻接表模型** 存储，`t_intent_node` 表关键字段：
+
+```sql
+intent_code   parent_code   name         level     kind     collection_name   mcp_tool_id    top_k   prompt_snippet
+biz           NULL          业务系统      DOMAIN(0) KB       NULL              NULL           NULL    NULL
+biz-oa        biz            OA系统       CATEGORY  KB       NULL              NULL           NULL    NULL
+biz-oa-intro  biz-oa        OA系统介绍   TOPIC(2)  KB       oa_collection     NULL           5       "请使用OA术语"
+biz-oa-flow   biz-oa        OA审批流程   TOPIC(2)  KB       oa_collection     NULL           10      NULL
+mcp-weather   NULL          天气查询      TOPIC(2)  MCP      NULL              weather_query  NULL    NULL
+sys-chat      NULL          日常闲聊      TOPIC(2)  SYSTEM   NULL              NULL           NULL    "你好，我是小码"
+```
+
+**三层级枚举** — `IntentLevel` 类：
+
+| 层级 | 枚举值 | 含义 |
+|:---|:---|:---|
+| DOMAIN(0) | 领域 | 顶层业务域（如"业务系统""集团信息化""系统交互"） |
+| CATEGORY(1) | 分类 | 中层子系统（如"OA系统""保险系统""人事"） |
+| TOPIC(2) | 主题 | 叶子节点，具体知识主题（如"OA系统介绍""审批流程"） |
+
+**三种意图类型** — `IntentKind` 枚举：
+
+| Kind | code | 含义 | 执行路径 |
+|:---|:---|:---|:---|
+| KB | 0 | 知识库检索 | 走多通道检索 + RRF + Rerank |
+| MCP | 2 | 工具调用 | 走参数提取 + 工具执行 |
+| SYSTEM | 1 | 系统交互 | 直接 LLM 回复，不走检索 |
+
+**只有叶子节点参与分类打分**。`isLeaf()` 判断 `children` 是否为空。非叶子节点（DOMAIN、CATEGORY）只做结构分组，不出现在分类提示词中。
+
+### 18.2 意图树的加载与缓存
+
+```java
+// DefaultIntentClassifier.loadIntentTreeData() — 三层缓存
+1. 从 Redis 读取整棵树 (IntentTreeCacheManager.getIntentTreeFromCache)
+2. Redis miss → 从 DB 加载 (loadIntentTreeFromDB) → 回填 Redis
+3. 构建内存结构: flatten(展平) → 过滤叶子节点 → id2Node Map
+
+// IntentTreeFactory 承担 DB 到内存的转换:
+// DO → IntentNode → parent/children 组装 → fillFullPath(DOMAIN > CATEGORY > TOPIC)
+```
+
+**为什么缓存整棵树而非逐节点查询？** 意图树节点少（几十个），整棵树序列化成本低。每次分类需要所有叶子节点信息，逐节点查询反而更慢。Redis 缓存 + 本地内存双级缓存，命中后零 DB 查询。
+
+### 18.3 分类流程 — LLM 一次性评所有叶子节点
+
+```java
+// DefaultIntentClassifier.classifyTargets(question)
+// 1. 构建提示词 — 把所有叶子节点的 id/path/description/examples/kind 展平
+for (IntentNode node : leafNodes) {
+    sb.append("- id=").append(node.getId());
+    sb.append("  path=").append(node.getFullPath());
+    sb.append("  description=").append(node.getDescription());
+    sb.append("  type=").append(node.isMCP() ? "MCP" : node.isSystem() ? "SYSTEM" : "KB");
+    sb.append("  examples=").append(String.join(" / ", node.getExamples()));
+}
+
+// 2. 调 LLM: temperature=0.1, topP=0.3 — 极低温度保证分类一致性
+ChatRequest request = ChatRequest.builder()
+    .messages(List.of(ChatMessage.system(systemPrompt), ChatMessage.user(question)))
+    .temperature(0.1D).topP(0.3D).thinking(false).build();
+String raw = llmService.chat(request);
+
+// 3. 解析 JSON 响应: [{"id":"biz-oa-intro","score":0.92,"reason":"问题询问OA系统整体功能"}]
+```
+
+**提示词 `intent-classifier.st` 的核心约束**：
+
+```
+# 实体导向问题 → 强匹配：关键实体必须在 id/path/description/examples 中出现
+# 主题导向问题 → 主题词匹配 path/description
+# 评分标准: >0.8 强匹配 / 0.4-0.8 中等 / <0.4 弱相关 → 建议返回空数组
+# 数量控制: 默认返回 1 个，明确多问题时最多 3 个
+# 系统限定: 问"OA系统"时不要选"保险系统"分类（跨系统防护）
+```
+
+### 18.4 从意图到执行 — 完整流转链路
+
+```
+用户提问: "北京今天天气怎么样？审批流程是什么？"
+  │
+  ▼
+rewriteQuery(): LLM 改写拆分
+  rewrittenQuestion: "北京天气查询 审批流程"
+  subQuestions: ["北京天气查询", "审批流程"]
+  │
+  ▼
+resolveIntents(): 每个子问题并行分类
+  ┌─ "北京天气查询" → [{node: mcp-weather, score: 0.95, kind: MCP}]
+  └─ "审批流程"     → [{node: biz-oa-flow, score: 0.88, kind: KB}]
+  │
+  ▼
+IntentResolver.mergeIntentGroup():
+  mcpIntents = [NodeScore(mcp-weather, 0.95)]
+  kbIntents  = [NodeScore(biz-oa-flow, 0.88)]
+  │
+  ▼
+RetrievalEngine.retrieve(): 并行执行
+  ┌─ KB 路径: retrieveAndRerank()
+  │    → kbIntents → MultiChannelRetrievalEngine.retrieveKnowledgeChannels()
+  │    → 多通道检索 + RRF + Rerank → KbResult
+  │
+  └─ MCP 路径: executeMcpAndMerge()
+       → mcpIntents → mcpBatchExecutor 线程池并行
+       → McpParameterExtractor.extractParameters() — LLM 提取工具参数
+       → McpClientToolExecutor.execute() — 同步调用 mcpClient.callTool()
+       → ContextFormatter.formatMcpContext() — 格式化工具结果为 <data> 标签
+  │
+  ▼
+RetrievalContext:
+  mcpContext = "<data>【北京 今日天气】\n日期: 2024年...\n天气: 晴\n温度: 18°C ~ 28°C</data>"
+  kbContext  = "<content source='OA系统文档'>OA审批包括提交申请→部门审批→人事审批三步</content>"
+  │
+  ▼
+RAGPromptService.buildStructuredMessages(): 场景选择
+  hasMcp()=true && hasKb()=true → PromptScene.MIXED
+  → 使用 answer-chat-mcp-kb-mixed.st 模板
+  → KB 证据 + MCP 证据 拼入同一个 Prompt
+  │
+  ▼
+streamLLMResponse(): LLM 流式生成回复
+  "今天北京天气晴朗，18°C~28°C。审批流程包括三步：提交申请→部门审批→人事审批。"
+```
+
+### 18.5 "Agent" 的本质 — 不是独立 Agent 循环
+
+**面试核心话术**：这个项目的 "Agent" 不是 LangChain 的 ReAct loop（思考→行动→观察→思考...）。它采用的是**意图驱动的管线分流**模式：
+
+```
+意图树节点 = 微型 Agent 配置
+  - KB 节点：Agent 的行为是"检索知识库"
+  - MCP 节点：Agent 的行为是"调用工具获取实时数据"
+  - SYSTEM 节点：Agent 的行为是"闲聊回复"
+
+每个节点携带：
+  - collection_name → 去哪里查
+  - mcp_tool_id → 调哪个工具
+  - top_k → 查多少条
+  - prompt_snippet → 回答有什么规则
+  - param_prompt_template → 工具参数怎么提取
+```
+
+**为什么不做 Agent loop？**
+
+| 考量 | Agent Loop（ReAct） | 意图管线分流（本项目） |
+|:---|:---|:---|
+| 多步推理 | ✅ 支持 "查订单→根据金额查优惠→计算折扣" | ❌ 单步执行 |
+| 延迟 | ❌ 每步一次 LLM 调用，3 步=3 次 LLM 延迟 | ✅ 一次分类 + 一次工具调用 |
+| Token 消耗 | ❌ 每步要带完整历史 | ✅ 只调一次 LLM 分类 |
+| 确定性 | ❌ LLM 可能反复改参数、无限循环 | ✅ 意图稳定 |
+| 企业场景适配 | ❌ 企业场景工具调用少、逻辑简单 | ✅ 够用 |
+
+**"意图 Agent 间的流转"** 在这个架构中表现为：
+
+1. **同一轮对话中的并行执行**：多个子问题的 KB 和 MCP 意图通过线程池**并行**处理。不是 A→B→C 的顺序流转，而是"同时触发，各自执行，结果合并"
+2. **跨轮流转**：通过记忆系统传递上下文。上一轮的摘要会作为 system 消息注入下一轮，LLM 自动衔接。这是隐式的 state machine，不是显式的 Agent 路由
+3. **歧义引导 = 人机交互的流转**：当意图不清时，`IntentGuidanceService` 生成选项让用户选择 → 用户选择后下一轮意图直接命中 → 这是一种人参与的 Agent 流转
+
+### 18.6 歧义引导的触发逻辑
+
+```java
+// IntentGuidanceService.detectAmbiguity() — 三道关卡
+1. filterCandidates(): 只取 KB 意图中 score >= 0.35 的
+2. 按 "系统节点" 分组：取每个系统内最高分的意图节点
+3. 候选数 < 2 → 不触发
+
+4. shouldSkipGuidance() — 快速通道:
+   - 第一名分数/第二名分数 < 0.65(threshold-margin) → 意图明确，跳过
+   - 用户问题中包含系统名(如"OA") → 用户已经指明了，跳过
+
+5. confirmAmbiguity() — 确认歧义:
+   - 第二名/第一名 >= 0.8 → 直接判定歧义
+   - 第二名/第一名 在 [0.65, 0.8) → 调 LLM 二次确认 (ambiguityLLMChecker)
+   - 第二名/第一名 < 0.65 → 不触发
+
+6. 生成引导选项:
+   "您想了解的是哪方面的数据安全规定？
+    1. OA系统的数据安全
+    2. 保险系统的数据安全"
+```
+
+**关键阈值**：
+- `ambiguityScoreRatio = 0.8`：第二名分数达到第一名 80% 以上才触发歧义
+- `ambiguityMargin = 0.15`：边界区间宽度，区间内调 LLM 二次确认
+
+### 18.7 意图树的扩展性
+
+**新增一个知识库节点**：
+1. 在管理后台意图树编辑器中添加叶子节点
+2. 配置：name、description、examples、collection_name、top_k、prompt_snippet
+3. 保存 → DB INSERT → 清 Redis 缓存 → 下次分类自动生效
+4. **不需要改代码、不需要重启服务**
+
+**新增一个 MCP 工具节点**：
+1. 在 mcp-server 中新增执行器类（实现 McpServerFeatures.SyncToolSpecification）
+2. 在管理后台意图树中新增节点，kind=MCP，mcp_tool_id = 工具名
+3. bootstrap 的 `McpClientAutoConfiguration` 启动时自动通过 MCP 协议发现新工具
+4. **MCP 工具和意图树节点解耦** — 工具实现在 mcp-server，路由配置在意图树
+
+**面试话术**："意图树的设计本质上是一个可配置的路由表 + 策略配置中心。每个叶子节点独立配置 collection_name、top_k、prompt_snippet、mcp_tool_id。新增知识库或工具不需要改检索管线代码——配置节点即生效。这是策略模式 + 注册表模式在配置层的体现。"
+
+---
+
 ## 附录：核心文件索引
 
 | 功能 | 核心文件 |
