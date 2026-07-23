@@ -915,3 +915,342 @@ streamLLMResponse(): LLM 流式生成回复
 | 限流 | `FairDistributedRateLimiter.java` |
 | 配置 | `application.yaml`, `SearchChannelProperties.java`, `MemoryProperties.java` |
 | 表结构 | `resources/database/schema_pg.sql` |
+
+---
+
+## 十九、多路召回归一化 — 分数不可比问题的完整解决方案
+
+### 19.1 问题本质：五条路五种分数量纲
+
+一个 chunk 可能在多条通道中被召回，但每条通道的分数含义完全不同：
+
+| 通道 | 分数来源 | 量纲 | 取值范围 | 备注 |
+|:---|:---|:---|:---|:---|
+| **向量** | `cosine_similarity(q_vec, d_vec)` | 无量纲（夹角余弦） | [-1, 1] | 实际几乎全为正数 |
+| **关键词** | `BM25(q, d)` | 有量纲（词频×逆文档频率） | [0, +∞) | 不同查询/文档的 BM25 不可直接比较 |
+| **知识图谱** | `LightRAG.relevance_score` | 各后端自定 | [0, 1] 或自由 | 取决于后端实现 |
+| **联网搜索** | `1.0f / (rank + 1)` | 无量纲（名次倒数） | (0, 1] | 人工构造的名次递减分 |
+
+**一个具体例子说明为什么不能直接加权**：
+
+```
+用户: "OA系统的审批流程"
+向量通道: chunk_A (cosine=0.82, rank=0), chunk_B (cosine=0.75, rank=1)
+关键词通道: chunk_A (BM25=15.3, rank=2), chunk_C (BM25=18.7, rank=0)
+
+问题1: 直接按分数加权平均？
+  0.82 + 15.3 = ?  — 量纲不同，毫无意义
+
+问题2: 各通道归一化到 [0,1] 再加权？
+  向量归一化: chunk_A=0.82, chunk_B=0.75 (保持线性)
+  BM25 归一化: chunk_A=15.3÷18.7=0.818, chunk_C=18.7÷18.7=1.0
+  → BM25 的 15.3 vs 18.7 可能只是微小差异，
+    但除最大值归一化后变成了 0.818 vs 1.0 的巨大差距 — 失真严重
+```
+
+### 19.2 解决方案：RRF — 只信名次，不信分数
+
+核心思想来自学术论文 _Reciprocal Rank Fusion outperforms Condorcet and individual rank learning methods_：
+
+```java
+// FusionPostProcessor.fuseByRrf() — 核心实现
+score(chunk) = Σ_channel 1 / (k + rank_channel + 1)
+
+// k = 60（默认），rank 从 0 开始
+// rank 取的是 SearchChannelResult.getChunks() 中各通道的原始召回顺序
+```
+
+**为什么名次是跨通道可比的？**
+
+```
+向量通道 rank=0: 本通道最像的 chunk（不管原始 cosine 是 0.99 还是 0.52）
+关键词通道 rank=0: 本通道 BM25 最高的 chunk（不管分数是 100 还是 5）
+
+→ "rank=0" 在所有通道中都有相同的语义：这是该通道认为最相关的 chunk
+→ 这个共识是跨通道可比的
+```
+
+**RRF 的数学特性**：
+
+```
+1/(k + rank) 关于 rank 是递减函数（k=60）：
+
+rank 0:  1/61 = 0.01639
+rank 1:  1/62 = 0.01613  (降 1.6%)
+rank 2:  1/63 = 0.01587  (降 1.6%)
+rank 3:  1/64 = 0.01563  (降 1.5%)
+rank 5:  1/66 = 0.01515  (降 7.6%  from rank 0)
+rank 10: 1/71 = 0.01408  (降 14.1% from rank 0)
+rank 20: 1/81 = 0.01235  (降 24.7% from rank 0)
+rank 50: 1/111= 0.00901  (降 45.0% from rank 0)
+
+特点：
+- 高名次(rank 0-5)之间差异小 → winners stay on top，不会因为微小差异来回换位
+- 低名次(rank 20+)贡献极小 → 自动过滤噪音
+- k 越大曲线越平 → 名次差异被压缩，各通道更平等
+- k 越小高名次越有优势 → 领头羊更突出
+```
+
+### 19.3 完整的三步融合流水线
+
+```
+阶段 1: 各通道原始分（量纲不可比，仅用于通道内排序）
+  ├─ 向量通道: chunk_A(cosine=0.82), chunk_B(0.75), chunk_C(0.68)  [按 cosine 降序]
+  ├─ 关键词通道: chunk_C(BM25=18.7), chunk_D(15.3), chunk_A(12.1)  [按 BM25 降序]
+  └─ 联网搜索: chunk_E(1/1=1.0), chunk_F(1/2=0.5)                    [按 You.com 返回顺序]
+
+阶段 2: Dedup 去重合并（order=1）
+  chunk_A 在向量和关键词都出现 → 保留向量通道的 chunk_A(因为优先级: 向量>图谱>关键词>联网)
+  chunk_C 在向量和关键词都出现 → 保留向量通道的 chunk_C
+  
+  合并去重后: chunk_A(0.82), chunk_B(0.75), chunk_C(0.68), chunk_D(BM25=15.3), chunk_E(1.0), chunk_F(0.5)
+  这些分数已经没啥用了 — RRF 只看名次
+
+阶段 3: RRF 名次级融合（order=5）— 依据各通道原始顺序
+  chunk_A 在向量排 rank 0，在关键词排 rank 2:
+       RRF = 1/(60+0+1) + 1/(60+2+1) = 0.0164 + 0.0159 = 0.0323
+  chunk_C 在向量排 rank 2，在关键词排 rank 0:
+       RRF = 1/(60+2+1) + 1/(60+0+1) = 0.0159 + 0.0164 = 0.0323 (对称)
+  chunk_D 只在关键词排 rank 1:
+       RRF = 1/(60+1+1) = 0.0161  (单通道命中，相当于多路命中的一半)
+  chunk_E 只在联网排 rank 0:
+       RRF = 1/(60+0+1) = 0.0164
+
+  → RRF 排序: chunk_A(0.0323) = chunk_C(0.0323) > chunk_E(0.0164) > chunk_D(0.0161)
+  → 多路命中的 chunk_A 和 chunk_C 排最前
+  → 截断到 rerankCandidateLimit=50 → 送入 Rerank
+
+阶段 4: Rerank 精排（order=10）— 最终分值
+  cross-encoder 输出 relevance_score [0, 1]:
+  chunk_A=0.91, chunk_C=0.85, chunk_D=0.79, ...
+  → 最终排序由 Rerank 分数决定
+```
+
+### 19.4 权重分配 — RRF 框架下的三种隐式权重
+
+**RRF 本身不需要显式权重**，但系统通过三种机制控制各通道的影响力：
+
+**机制一：通道优先级（Dedup 阶段去重时用）**
+
+```java
+// DeduplicationPostProcessor.getChannelPriority()
+VECTOR(1) > GRAPH(3) > KEYWORD(5) > WEB_SEARCH(20)
+// 同一个 chunk 多通道命中时，保留高优先级通道版本的分数（元数据）
+// 虽然 RRF 不用这个分数，但后续 MetadataEnrichment 富化时用 channel=1 的信息更丰富
+```
+
+**机制二：召回数量（topKMultiplier）**
+
+```yaml
+rag.search.channels:
+  vector.intent-directed.top-k-multiplier: 2   # 召回 2×topK
+  vector.global.candidate-budget: 100           # 全局检索召回 100 个
+  keyword.top-k-multiplier: 2                   # 召回 2×topK
+  web-search.count: 5                           # 最多 5 条
+```
+
+**这实质上是最重要的"隐式权重"**——向量通道贡献了 50-100 个候选（ranks 0-99），关键词可能只贡献 5-10 个（取决于 ES 索引规模）。多贡献的通道 = 更多 rank 位置 = 更多机会贡献 RRF 分数。
+
+**机制三：k 值（名次敏感度）**
+
+k=60 意味着 rank 0 和 rank 10 的 RRF 分差 14%。如果某通道返回的前 5 个都是高质量 chunk（但 rank 6-50 是噪音），减小 k 到 20 可以让 rank 0-5 的优势更突出（差 24%），从而减少后面噪音的干扰。
+
+**为什么不加显式加权系数？**
+
+RRF 的设计哲学是：**如果需要在 RRF 上再加权重，说明通道本身的召回质量有问题，应该优化通道而非调权重**。学术上也证实 RRF 不加权版本在大多数场景下不弱于加权版本。
+
+### 19.5 单通道时的处理
+
+```java
+// FusionPostProcessor.process() — 单通道直接跳过 RRF
+List<RetrievedChunk> ranked = results != null && results.size() > 1
+        ? fuseByRrf(chunks, results)  // 多通道 → RRF 融合
+        : chunks;                      // 单通道 → 保持原召回顺序不变
+```
+
+只有一条路时没有"融合"的对象，原顺序 = 最优顺序。
+
+### 19.6 k 值调参指南（结合场景）
+
+| k 值 | rank 0 vs rank 3 | rank 0 vs rank 10 | 适用场景 |
+|:---|:---|:---|:---|
+| **20** | 1/21=0.0476 vs 1/24=0.0417 (差 12%) | 1/21=0.0476 vs 1/31=0.0323 (差 32%) | 某通道明显更准，需要保护高名次优势 |
+| **60（默认）** | 1/61=0.0164 vs 1/64=0.0156 (差 4.8%) | 1/61=0.0164 vs 1/71=0.0141 (差 14%) | 通道质量相当，依赖多路命中提权 |
+| **100** | 1/101=0.0099 vs 1/104=0.0096 (差 2.9%) | 1/101=0.0099 vs 1/111=0.0090 (差 9%) | 通道质量参差不齐，给所有通道均等机会 |
+
+**调参实践**：
+- 如果发现关键词通道的好结果总被向量通道的同义反复排挤 → 调大 k（如 80-100）
+- 如果发现 RRF 融合后排名混乱（真正相关的 chunk 排到后面） → 调小 k（如 30-50）
+- 如果只有向量通道 → k 值无关紧要（单通道不走 RRF）
+
+### 19.7 面试话术模板
+
+> "多路召回最大的难点是**分数量纲不可比**——向量的余弦相似度是 [-1,1] 的无量纲值，BM25 分数取决于文档长度和词频没有上界。你没法直接加权平均，因为 0.82 和 15.3 根本没有可比性。即使先把各路分数分别归一化到 [0,1]，也会扭曲原始分数的分布——比如 BM25 的 15.3 和 18.7 可能只是一点微小差异，但除最大值归一化后就变成了 0.82 和 1.0。
+>
+> 我们用的是 **RRF（Reciprocal Rank Fusion）**，核心理念是**只信名次，不信分数**。公式 `Σ 1/(k+rank+1)`，k 默认 60。因为 `rank=0` 在所有通道中语义相同——都是"本通道认为最相关的 chunk"，这是跨通道唯一的共识信号。
+>
+> 同一个 chunk 如果在多条通道都排前列，RRF 分会比单通道命中高出一倍，这天然实现了**多路命中的提权**。比如一个 chunk 在向量通道排 rank 0、在关键词排 rank 2，RRF = 1/61 + 1/63 = 0.032；而只在一个通道排 rank 0 的 chunk RRF = 0.016。多路命中自然靠前，不需要人为调权重。
+>
+> RRF 之后还有 Rerank cross-encoder 做精排，这是最终的语义相关性分数。RRF 的角色是粗排——把多路不可比的结果统一到一个可比的尺度上，并缩减候选池给 Rerank。
+
+---
+
+## 二十、Ragent 与 Agentic RAG 的关系
+
+### 20.1 什么是 Agentic RAG
+
+先厘清概念。业界说的 **Agentic RAG** 通常有两层含义：
+
+**定义 A（狭义）— 带工具调用的 RAG**：RAG 系统不仅能检索文档，还能调用外部工具（天气 API、数据库查询、计算器等）获取动态数据。检索 + 工具结果混合后一起喂 LLM。
+
+**定义 B（广义）— 自主规划与决策的 RAG**：Agent 有自主规划能力——分析问题→分解子任务→决定查什么/调什么工具→观察结果→决定下一步→循环直到得到答案。即 Observe-Plan-Act 循环。
+
+### 20.2 Ragent 在 Agentic RAG 光谱中的位置
+
+```
+纯 RAG ────────── Agentic RAG (狭义) ────────── Full Agent（广义）
+  │                    │                              │
+  ①检索+生成           ②检索+工具调用+意图路由          ③自主规划+多步推理+工具链
+                    ▲ Ragent 在这里                      （LangChain ReAct、AutoGPT）
+```
+
+Ragent 处于 **第②层**，具有以下 Agentic 能力：
+
+| 能力 | 实现 | 与 Full Agent 的差距 |
+|:---|:---|:---|
+| **工具调用** | MCP 协议 + McpClientToolExecutor | ✅ 具备，但单次调用，无工具链 |
+| **意图路由** | 意图树三路分发 KB/MCP/SYSTEM | ✅ 具备，但路由是一次性决策，不迭代 |
+| **参数提取** | McpParameterExtractor 调 LLM | ✅ 具备，LLM 从问题中提取工具参数 |
+| **多步推理** | 无 | ❌ 不具备，无法 "查订单→根据金额查优惠→计算价格" |
+| **自主决策** | 无 | ❌ 不具备，不会自主选择"要不要再查一次" |
+| **反馈循环** | 无 | ❌ 不具备，工具结果不回传给 Agent 做二次决策 |
+
+### 20.3 Ragent 的 Agentic 机制详解
+
+#### 机制一：意图驱动的工具发现与注册
+
+```java
+// McpClientAutoConfiguration.init() — 启动时自动发现远程工具
+for (McpClientProperties.ServerConfig server : servers) {
+    McpSyncClient client = McpClient.sync(transport)   // 通过 MCP 协议连接 mcp-server
+        .clientInfo(new Implementation("ragent-bootstrap", "1.0.0"))
+        .build();
+    client.initialize();                    // 握手
+    List<Tool> tools = client.listTools(); // 发现远程工具列表
+    for (Tool tool : tools) {
+        toolRegistry.register(new McpClientToolExecutor(client, tool)); // 自动注册
+    }
+}
+```
+
+**这是 Agentic 的第一步：环境感知**。系统启动时自动扫描 MCP Server 上可用的工具，注册到工具注册表。工具定义（name、description、JSON Schema）由 mcp-server 端维护，bootstrap 端零配置。
+
+#### 机制二：意图驱动的工具选择
+
+```java
+// RetrievalEngine.buildSubQuestionContext() — 按意图类型分流
+List<NodeScore> kbIntents = NodeScoreFilters.kb(intent.nodeScores());   // KB 意图
+List<NodeScore> mcpIntents = NodeScoreFilters.mcp(intent.nodeScores()); // MCP 意图
+
+// KB 路径 → 多通道检索
+KbResult kbResult = retrieveAndRerank(intent, kbIntents, topK);
+
+// MCP 路径 → 参数提取 + 工具调用
+String mcpContext = executeMcpAndMerge(intent.subQuestion(), mcpIntents);
+```
+
+**两条路并行执行**，结果在 `RetrievalContext` 中合并。LLM 的最终 Prompt 中 KB 证据和 MCP 数据混在一起。
+
+#### 机制三：LLM 驱动的参数提取
+
+```java
+// McpParameterExtractor.extractParameters() — LLM 从自然语言问题中提取结构化参数
+// 输入: "北京今天热不热"
+// 输出: {"city": "北京", "queryType": "current"}
+
+// 每个 MCP 节点可以有自定义参数提取提示词 (paramPromptTemplate)
+// 天气查询: "从用户问题中提取城市名和查询类型"
+// 销售查询: "从用户问题中提取地区、产品线、时间范围"
+```
+
+#### 机制四：意图节点 = 微型 Agent 配置
+
+```yaml
+# 每个意图叶子节点就是一个 Agent 的配置单元:
+biz-oa-flow:       # 节点 ID
+  kind: KB          # Agent 行为: 检索知识库
+  collection: oa    # 去哪查
+  top_k: 10         # 查多少
+  prompt_snippet: "请使用OA术语"  # 回答约束
+
+mcp-weather:       # 节点 ID
+  kind: MCP         # Agent 行为: 调工具
+  mcp_tool_id: weather_query   # 调哪个工具
+  param_prompt: "提取城市和查询类型"  # 怎么提参数
+
+sys-chat:          # 节点 ID
+  kind: SYSTEM      # Agent 行为: 闲聊
+  prompt_template: "你好，我是企业助手小码"  # 回复风格
+```
+
+### 20.4 与 Full Agent（ReAct Loop）的对比
+
+以一个具体问题来对比：
+
+> 用户："查一下北京销售团队的业绩，如果超过 1000 万就帮我生成一份报告"
+
+| 维度 | Full Agent (ReAct) | Ragent 当前实现 |
+|:---|:---|:---|
+| **Step 1** | Thought: 需要先查业绩 → Action: 调用 sales_query | 意图分类命中 mcp-sales |
+| **Step 2** | Observation: 业绩 1200 万 → Thought: 超过 1000 万，需要生成报告 | **不具备**。工具结果直接返回给 LLM，不做逻辑判断 |
+| **Step 3** | Action: 调用 report_generate | **不具备**。无法根据上一步结果自动触发下一步 |
+| **结果** | 自动完成查业绩→判断→生成报告 | 返回销售数据，用户需要自己判断并手动请求生成报告 |
+
+**Ragent 的管线是一次性的**：意图分类→工具调用→结果拼 Prompt→LLM 生成。中间不会根据工具返回结果做二次决策。
+
+### 20.5 为什么 Ragent 选择管线而非 Full Agent？
+
+| 考量 | Full Agent Loop | Ragent 管线 |
+|:---|:---|:---|
+| **延迟** | 每步一次 LLM 调用 × 不确定步数（可能 3-10 轮） | 固定：1 次 LLM 分类 + 并行工具调用 + 1 次 LLM 生成 |
+| **Token 消耗** | 每步带完整对话历史 | 只分类一次 |
+| **稳定性** | LLM 可能选错工具、无限循环、幻觉操作 | 意图树约束了可选工具范围 |
+| **企业场景适配** | 大多数企业 QA 不需要多步推理 | ✅ 一次问答一次回答，大多数场景够用 |
+| **可解释性** | 多步推理链路难以追溯 | 每次问答链路清晰（Trace） |
+
+**面试话术**：
+> "Agentic RAG 是一个光谱，Ragent 处于光谱的第二层——具备工具调用和意图路由能力，但不是全自主的多步推理 Agent。我们选择管线的核心原因是 **企业场景的确定性需求**。大多数企业 QA（查政策、查天气、查订单）不需要多步推理，单次意图分类+工具调用已经覆盖了 90% 的场景。管线的延迟可控（固定两轮 LLM 调用）、成本可预测、行为可解释，这比 Agent loop 的灵活性在企业场景中更重要。"
+
+### 20.6 如果要升级到 Full Agent
+
+当前架构已经具备了升级基础：
+
+1. **工具注册表已就绪**：`McpToolRegistry` 管理所有可用工具
+2. **参数提取已实现**：`McpParameterExtractor` 可以从自然语言中提取参数
+3. **意图树可扩展**：新增节点即可新增 Agent 能力
+
+**改造路径**：将 `StreamChatPipeline` 中的线性固定流程替换为循环决策流程：
+
+```java
+// 升级为 Agent Loop 的伪代码
+while (!taskComplete && iterations < maxIterations) {
+    // 1. 让 LLM 自主决策下一步: 继续检索？调工具？输出结果？
+    PlanStep step = llm.plan(history, availableTools, retrievalResults);
+    
+    switch (step.action) {
+        case RETRIEVE -> results = retrievalEngine.retrieve(step.intents, step.topK);
+        case CALL_TOOL -> toolResults = toolRegistry.execute(step.toolId, step.params);
+        case ANSWER -> { taskComplete = true; streamResponse(); }
+    }
+}
+```
+
+**改造代价**：延迟和成本倍数增长（每步一次 LLM 调用），需要增加 `maxIterations` 安全阀防止死循环。
+
+### 20.7 面试话术模板
+
+> "Ragent 是一个 **Agentic RAG 系统**，但这里的 Agentic 不是指 LangChain 那种 ReAct 自主决策循环，而是指**意图驱动的管线分流**——通过三层意图树将用户问题路由到 KB 检索、MCP 工具调用或 SYSTEM 闲聊三条执行路径。
+>
+> 之所以不搞 Agent loop，是因为企业场景以确定性交互为主。用户问'年假几天''北京天气''订单状态'，都是一次问答即可完成。Agent loop 的多步推理收益不大，但延迟加倍、成本不可控。
+>
+> 我们的 Agentic 体现在四个层面：第一，通过 MCP 协议自动发现和注册远程工具；第二，意图分类时 LLM 自主判断该走检索还是工具调用还是闲聊；第三，工具参数由 LLM 从自然语言中提取；第四，KB 和 MCP 结果在最终 Prompt 中融合，LLM 综合双方信息生成答案。这是一种**务实的 Agentic 设计**——在保证确定性和性能的前提下，最大化自动化能力。"
