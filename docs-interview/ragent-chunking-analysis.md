@@ -565,6 +565,32 @@ private static List<VectorChunk> overlapTail(List<VectorChunk> buffer, int budge
 
 **与递归字符切分的本质差异**：递归字符的问题是"能找到分隔符但不知道分隔符的意义"。`\n\n` 可能是段落边界也可能是表格内的空行。STRUCTURE_AWARE 先分类再分块，避免了这个问题。
 
+### 5.2.1 STRUCTURE_AWARE vs Block-Aware：同一思路，不同精度
+
+**两者的核心逻辑完全一致**——"先识别结构，只在结构边界切分"。区别在于识别结构的手段和精度：
+
+```
+STRUCTURE_AWARE（regex 行扫描）          Block-Aware（commonmark AST）
+─────────────────────────────────────  ───────────────────────────────
+/^#{1,6}\s+.*$/  → HEADING            Heading 节点      → HeadingBlock
+空行分隔          → PARA                Paragraph 节点    → ParagraphBlock
+/^```.*$/        → CODE                FencedCodeBlock   → CodeBlock
+/^!\[.../        → ATOMIC              Image 节点        → ImageBlock
+                                       BulletList 节点   → ListBlock
+                                       GFM TableBlock    → TableBlock
+```
+
+**STRUCTURE_AWARE 覆盖不到的东西**（为什么它是降级路径而非主力策略）：
+
+1. **没有 ListBlock** — 列表项被当成普通段落（PARA），和周围的文本段落混在一起。无法区分有序/无序，也无法在检索时按列表类型分流
+2. **没有 TableBlock** — markdown 表格被当成普通段落，双文本嵌入（key-value）无从谈起，embedding 模型面对 markdown 表格行只能看到被竖线分隔的 token
+3. **没有 ImageBlock** — 图片行只是标记为 ATOMIC 防止切碎，但没有 RustFS AssetRef 和 VLM description。检索时图片没有独立的资产引用，也无法被 VLM 描述文本召回
+4. **没有 outlinePath 注入** — HEADING 只用来做 chunk 边界（遇到标题就断块），不会像 HeadingHandler 那样累积路径并注入到后续块的元数据。chunk 不知道自己属于哪个章节
+5. **没有 sectionContext** — 表格的表头摘要、sheet 名等上下文信息完全丢失
+6. **没有嵌套结构处理** — 代码块内的 markdown 语法、列表嵌套、引用块内嵌表格等，regex 无法正确解析。AST 方案天然支持递归嵌套
+
+**一句话**：STRUCTURE_AWARE 是 block-aware 的降级近似，它用 regex 做到了"在结构边界切分"这个最低要求，但没有强类型 Block 体系带来的精细处理能力。当文档经过 Parser 拿到强类型 Block 时走 block-aware 获得完整能力，当只有纯文本（Tika 产出的平文本、用户粘贴的文本）时走 STRUCTURE_AWARE 至少保证不在句子中间乱切。
+
 ### 5.3 ChunkingMode 枚举与配置
 
 ```java
@@ -860,3 +886,219 @@ AgentFlow 没有显式的父子文档机制，靠 `ChatContextFilter` 上下文�
 > 语义切分（Embedding 相似度检测）我们没做——成本太高（每句话一次 Embedding），默认参数下平均块只有 43 Token，太碎；而且相似度"骤降"的阈值极难调准。页面级我们也不做——页面是渲染层概念，语义边界和物理边界是两回事，AgentFlow 特意做了跨页合并来对抗这个问题。
 >
 > Parent-Child 我们做了但不存两套 chunk——用 outlinePath + sectionContext + chunkIndex 排序回表还原原文顺序，效果等同但省去双倍成本。
+
+---
+
+## 十一、元数据（Metadata）详解
+
+> 每个 Chunk 入库时携带的元数据是投入产出比最高的一步——保留成本极低，但不保留就几乎无法事后重建。
+
+### 11.1 Ragent Chunk 实际携带的完整元数据
+
+**chunk 自身字段**（`VectorChunk`，`VectorChunk.java:43-118`）：
+
+```json
+{
+    "chunkId":         "1887234567890123456",
+    "index":           3,
+    "content":         "| 级别 | 基本工资 |...",
+    "blockType":       "TABLE",
+    "outlinePath":     ["第三章", "3.2 分产品线销量"],
+    "sectionContext":  "sheet=Sheet1; headers=级别, 基本工资, 绩效系数",
+    "sourceBlockIds":  ["uuid-1", "uuid-2"],
+    "assets":          [{"publicUrl":"...", "mimeType":"image/png", "sourceBlockId":"..."}],
+    "metadata":        {},
+    "embeddingText":   "级别: P6; 基本工资: 15000;...",
+    "embedding":       [0.023, -0.015, ...]
+}
+```
+
+**入库时追加的 doc 级元数据**（`MetadataEnrichment` 后处理器回表补齐）：
+
+```json
+{
+    "docId":       "1887234000000000001",
+    "docName":     "2026-Q2财报.pdf",
+    "chunkIndex":  3
+}
+```
+
+### 11.2 博客推荐的 7 个字段 vs Ragent 对照
+
+```
+博客字段               Ragent 对应                    覆盖?
+─────────────────────────────────────────────────────────
+source              Provenance.sourceFile            ✅ 有，但不在 chunk 上，在 doc 级
+section_path        outlinePath                      ✅ 有，且是 List 非字符串，更结构化
+page_number         Provenance 可记录但当前未用        ⚠️ 字段有，但解析器未填充页码
+chunk_index         VectorChunk.index                ✅ 有
+doc_type            无（可用 blockType 近似）          ⚠️ doc 类型在 DB 的 doc 表，不在 chunk
+embedding_model     无                                ❌ 没有
+created_at          chunkId(Snowflake)可反解时间       ⚠️ 有隐含时间，无显式字段
+```
+
+### 11.3 逐字段分析
+
+**① section_path → outlinePath（✅ 更强）**
+
+博客用字符串 `"第三章 > 3.2 分产品线销量"`，Ragent 用 `List<String>`：
+
+```java
+// 博客：字符串拼接，没法按级别过滤
+"第三章 > 3.2 分产品线销量"
+
+// Ragent：结构化列表，可以只取前两级做过滤
+["第三章", "3.2 分产品线销量"]
+// filter by outlinePath[0] == "第三章" → 限制检索范围到某一章
+```
+
+**② source → Provenance.sourceFile（✅ 有，但范式化了）**
+
+博客建议存 chunk 上（宽表），Ragent 存在 doc 表（范式化）。`sourceFile` 只在 Parser 阶段填写，入库后被 `docName` 替代。好处：源文件改名不影响 chunk 引用。坏处：多一跳 join。
+
+**③ page_number（⚠️ 字段有，未填充）**
+
+`Provenance` 记录目前只有 `sourceFile` 和 `sheetName`，没有 `pageNumber`。MinerU 产出的 markdown 里其实有页码信息，但 `UnpackVisitor` 没有提取到 `Provenance` 上。这导致引用标注时能标注到"第 3.2 节"（outlinePath），但标注不到"第 18 页"。
+
+**④ chunk_index → index（✅）**
+
+完全对应。Ragent 用 Integer，从 0 递增，ChunkPacker 合并后重排。关键用途：检索命中 chunk 后，通过 `docId` + `chunkIndex` 拉取前后相邻块扩展上下文——Parent-Child 等价方案的核心。
+
+**⑤ doc_type（⚠️ 不在 chunk 上）**
+
+Ragent 的 `doc_type` 存在 `t_knowledge_document` 表里（文档级别的分类），不在每个 chunk 上存储。检索过滤时走 doc 表 join。博客建议放 chunk 上是为了避免 join，但一个文档的所有 chunk 必然同类型，存 chunk 上是冗余。
+
+**⑥ embedding_model（❌ 没有）**
+
+博客说"很多人漏掉"的字段，Ragent 确实漏掉了。当前切换 Embedding 模型时没有按 model 重建 index 的机制。如果要做：在 `ChunkEmbeddingService` 写入前把当前 `embeddingModel` 写入 VectorChunk 的 `metadata` Map（这个 Map 就是预留的扩展点），或单独在 `t_knowledge_vector` 表加列。
+
+**⑦ created_at（⚠️ 隐含在 chunkId 中）**
+
+`chunkId` 用 Snowflake 雪花 ID，前 41 位是时间戳（毫秒），可反解出创建时间。但不是显式字段，要写 SQL 函数才能直接用时间过滤。博客建议显式存 `created_at` 主要是为了"找出旧模型建的 chunk 定向重建"——和 ⑥ 是同一个需求。
+
+### 11.4 每个 chunker 注入的字段对照表
+
+这是前面"HeadingHandler 累积路径注入到后续块的元数据"问题的完整答案——不仅 outlinePath，每个 chunker 在构建 VectorChunk 时各注入了不同字段：
+
+```
+                    Paragraph   Table      Image        Code       List
+                    ─────────   ─────      ─────        ────      ────
+chunkId             Snowflake   Snowflake  Snowflake    Snowflake  Snowflake
+index               startIndex  startIndex startIndex   startIndex startIndex
+content             text        表格md     描述+链接     ```围栏    -/1.渲染
+embeddingText       ❌ 不设     ✅ kv行     ✅ 描述去URL  ❌ 不设    ❌ 不设
+blockType           "PARAGRAPH" "TABLE"    "IMAGE"      "CODE"     "LIST"
+outlinePath         ✅          ✅         ✅           ✅         ✅
+sourceBlockIds      ✅ [b.id]   ✅ [b.id]  ✅ [b.id]    ✅ [b.id]  ✅ [b.id]
+assets              ❌          ❌         ✅ [AssetRef] ❌         ❌
+sectionContext      ❌          ✅ 表身份   ✅ sheet名   ❌         ❌
+metadata            ❌          ❌         ❌           ❌         ❌
+```
+
+**关键观察**：
+
+1. **outlinePath 是唯一所有 chunker 都注入的字段**——来自 ChunkContext，由 HeadingHandler 累积
+2. **embeddingText 只有 TableChunker 和 ImageChunker 设置**——这两个类型的 chunk 存在"展示格式 ≠ 嵌入格式"的问题。Paragraph/Code/List 的 content 天然适合直接 embedding
+3. **sectionContext 只有 TableChunker 和 ImageChunker 设置**——表格和图片切碎后需要额外的"我是谁"身份信息，段落/代码/列表的上下文由 outlinePath 充分表达
+4. **assets 只有 ImageChunker 设置**——只有图片需要携带 RustFS 上的资源引用，供检索时注入 LLM 上下文
+5. **所有 chunker 都设置 sourceBlockIds**——保证每个 chunk 都能追溯到 Parser 产出的具体 Block
+
+**ChunkPacker 合并时这些字段的变化**（`ChunkPacker.merge()`）：
+
+| 字段 | 合并策略 | 示例 |
+|:---|:---|:---|
+| **outlinePath** | **取最长公共前缀** | `["员工手册","第一章","1.1"]` + `["员工手册","第一章","1.2"]` → `["员工手册","第一章"]`（跨了两个子节，回退到共同上级章节） |
+| **sourceBlockIds** | 去重并集 | `["b1","b2"]` + `["b2","b3"]` → `["b1","b2","b3"]` |
+| **assets** | 去重并集 | 多个图片块合并时所有 AssetRef 汇总 |
+| **blockType** | 同质保留，异质 → `PARAGRAPH` | PARAGRAPH+PARAGRAPH → PARAGRAPH；PARAGRAPH+IMAGE → PARAGRAPH |
+| **sectionContext** | 取首个非空值 | 合并块归属第一个有 sectionContext 的 chunk |
+| **embeddingText** | 逐块按 `\n\n` 拼接 | 图片描述文本拼在一起，保留 embedding 信息 |
+| **content** | 逐块按 `\n\n` 拼接 | 段落间保留空行分隔 |
+
+### 11.5 元数据的完整生命周期
+
+```
+Parser 阶段（6 个解析器）
+  │  Block.id            — UUID
+  │  Block.provenance    — sourceFile + sheetName
+  │  Block.text/headers/rows/code/items — 强类型字段
+  │  ImageBlock.asset    — AssetRef (RustFS URL + MIME)
+  │  ImageBlock.description — VLM 图生文
+  │
+  ▼
+HeadingHandler（不产 chunk，只维护路径状态）
+  │  heading.text → outlinePath 累积
+  │  算法：同级替换、上级追加、顶级重置、跳级补齐
+  │
+  ▼
+各 Chunker + ChunkContext{outlinePath, config, startIndex}
+  │  ParagraphChunker  → content, blockType="PARAGRAPH", outlinePath, sourceBlockIds
+  │  TableChunker      → content(md表格), embeddingText(kv行), blockType="TABLE",
+  │                       sectionContext(sheet+caption+headers), outlinePath, sourceBlockIds
+  │  ImageChunker      → content(描述+![caption](url)), embeddingText(描述去URL),
+  │                       blockType="IMAGE", assets, sectionContext(sheet), outlinePath, sourceBlockIds
+  │  CodeChunker       → content(```围栏), blockType="CODE", outlinePath, sourceBlockIds
+  │  ListChunker       → content(-/1.渲染), blockType="LIST", outlinePath, sourceBlockIds
+  │
+  ▼
+ChunkPacker（合并相邻小块时元数据融合）
+  │  outlinePath     → 最长公共前缀（跨子节时回退到共同上级章节）
+  │  sourceBlockIds  → 去重并集
+  │  assets          → 去重并集
+  │  blockType       → 同质保留，异质→"PARAGRAPH"
+  │  sectionContext  → 首个非空值
+  │  embeddingText   → 逐块按 \n\n 拼接
+  │  content         → 逐块按 \n\n 拼接
+  │
+  ▼
+ChunkEmbeddingService
+  │  embeddingText != null → 用 embeddingText 调 Embedding API
+  │  embeddingText == null → 回退到 content 调 Embedding API
+  │  embedding 写入 VectorChunk.embedding（@JsonIgnore，不持久化到 DB 的文本列）
+  │
+  ▼
+向量库（Milvus/PGVector）
+  │  embedding        → float[] 向量列
+  │  chunkId/index/content/blockType/outlinePath/sectionContext → 元数据列
+  │
+  ▼
+检索时 MetadataEnrichment 后处理器回表补齐
+  │  docId       → t_knowledge_chunk.docId → t_knowledge_document.id
+  │  docName     → t_knowledge_document.doc_name → 剥后缀 → 业务码
+  │  chunkIndex  → 按 docId 分组 + chunkIndex 排序 → 还原原文顺序
+```
+
+### 11.6 "Metadata 能解锁的能力" 对照
+
+| 能力 | 博客方案 | Ragent 实现 |
+|:---|:---|:---|
+| **精准过滤** | `filter(doc_type="policy", year=2026)` | ✅ 检索时通过意图节点 `filterExpression` 过滤 docType/kbId |
+| **上下文扩展** | `chunk_index` 拉取前后相邻块 | ✅ MetadataEnrichment: 按 docId 分组 → chunkIndex 排序 → 取相邻块 |
+| **引用标注** | "来源：财报第 18 页，第 3.2 节" | ✅ outlinePath + docName 拼入 citation。**缺页码**（pageNumber 未填充） |
+| **权限控制** | department 字段限制检索范围 | ✅ kbId 过滤（知识库级别权限），非 chunk 级别 |
+| **版本管理** | source + version 精确删除旧向量 | ✅ schedule 机制：文档变更检测 → 全量重建该文档所有 chunk |
+
+### 11.7 Ragent 做对了什么、缺了什么
+
+**做了且做得更好的**：
+
+- `outlinePath` 用 `List<String>` 而非拼接字符串，可分级过滤
+- `sectionContext` 是独创字段，解决表格/图片切碎后的上下文问题（等价于 contextual chunking）
+- `blockType` 让检索时可以按块类型分流重排（表格走 BM25+向量、代码走纯 BM25）
+- `sourceBlockIds` 可追溯到 Parser 产出的具体 Block，排障时有精确锚点
+
+**博客建议但 Ragent 缺失的**：
+
+- `embedding_model`：切换 Embedding 模型时无法精确定位哪些 chunk 需要重建。`VectorChunk.metadata` Map 是预留的扩展点
+- `page_number`：Provenance 有扩展空间但不填充，导致引用标注缺页码
+- `created_at` 显式字段：Snowflake 反解是间接方案
+
+**设计哲学差异**：博客建议把所有元数据压平在 chunk 上（宽表，避免 join），Ragent 选择了范式化——doc 级字段存 doc 表、chunk 级字段存 chunk 表，检索时通过 join 或 MetadataEnrichment 补齐。对于企业内部部署型系统（非 SaaS 海量数据），范式化的多一跳开销可以忽略。
+
+### 11.8 面试话术："Metadata 怎么设计的？"
+
+> 我们的 Metadata 分两层。第一层是 chunk 自身携带的结构化字段——outlinePath 记录章节路径（用 List 而非字符串，支持分级过滤）、sectionContext 记录表格的表头和 sheet 名（实现 contextual chunking）、blockType 标记块类型（检索时可以按类型分流重排）、sourceBlockIds 用于精确溯源到 Parser 产出的 Block。
+>
+> 第二层是 doc 级元数据，通过 MetadataEnrichment 后处理器回表补齐——docId、docName、chunkIndex。我们没有把所有元数据压平在 chunk 上，而是选择了范式化——文档级别的字段存文档表、chunk 级别的存 chunk 表。对于企业部署型系统，这多出来的一跳 join 开销可以忽略，但避免了数据冗余和不一致。
+>
+> 目前一个已知的不足是没有记录 embedding_model 字段。如果要切换 Embedding 模型，需要全量重建 index。VectorChunk 的 metadata Map 是预留的扩展点，加这个字段只需要在 ChunkEmbeddingService 写入前 put 进去就行。

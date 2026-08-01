@@ -232,4 +232,62 @@
 2. `notes-2.md` 章节编号跳过了十三-十七，实际只有 一~十二 + 十八~二十一，不是缺失
 3. 两个文件都引用具体源码文件+行号，面试时可作为可信度背书
 4. 优先阅读 `notes-2.md` 的十八-二十一（意图树/Agentic RAG/RRF归一化/Query决策树），这些是面试加分深水区
-5. `notes.md` 的五(大表切分)、六(父子文档) 是两个完整的场景拆解案例，适合被问"举个例子"时展开
+5. **Chunking 专题**见 `ragent-chunking-analysis.md`，覆盖 Parser/Block/分块/Metadata 全链路，下方有独立速查表
+6. `notes.md` 的五(大表切分)、六(父子文档) 是两个完整的场景拆解案例，适合被问"举个例子"时展开
+
+---
+
+## Chunking 专题速查（ragent-chunking-analysis.md）
+
+### Q: Ragent 和 AgentFlow 的 Chunking 有什么区别？
+- 一 (line 7)：完整对比表 + 一句话总结
+
+### Q: MinerU 能处理什么格式？MinerU 直接输出 Block 吗？
+- 二.2 (line 93)：路由优先级表
+- 二.4 (line 130)：MinerU 六步异步流程
+- 二.5 (line 145)：两层分工架构（MinerU → markdown → commonmark → Block）
+
+### Q: commonmark AST 解析器是什么？
+- 二.6 (line 188)：原理、映射表、代码示例
+
+### Q: 6 种 Block 各是什么结构？有什么用？
+- 三.3 (line 293)：完整字段说明 + JSON 示例
+
+### Q: TableChunker 的双文本嵌入是怎么做的？
+- 四.4 (line 425)：content vs embeddingText 详细对比 + 为什么需要
+
+### Q: outlinePath 是怎么注入到每个 chunk 的？
+- 四.3 (line 412)：HeadingHandler 算法（同级替换/上级追加/顶级重置/跳级补齐）
+- 十一.4 (line 979)：每个 chunker 注入的字段对照表
+
+### Q: sectionContext 是什么？和 outlinePath 有什么区别？
+- 四.4 (line 425)：TableChunker 的 sectionContext 构造
+- 四.7 (line 476)：ImageChunker 的 sectionContext
+
+### Q: 按 block 类型分流 chunker 是什么意思？每种 block 的切分策略有什么不同？
+- 四.2 (line 380)：Dispatcher instanceof 分发链
+- 四.4-4.7：TableChunker/CodeChunker/ListChunker/ImageChunker 策略差异
+
+### Q: ChunkPacker 做了什么？合并时元数据怎么变？
+- 四.8 (line 484)：贪心合并 + 块级重叠
+- 十一.4 (line 979)：合并时各字段变化规则表
+
+### Q: STRUCTURE_AWARE 和 block-aware 是什么关系？
+- 五.2 (line 545)：STRUCTURE_AWARE 三步流程
+- 五.2.1 (line 568)：vs Block-Aware 对比（6 个覆盖不到的能力）
+
+### Q: Parent-Child 怎么做的？和传统方案有什么区别？
+- 八 (line 758)：零成本等价方案对比
+
+### Q: 六种业界分块策略你们用了哪些？为什么有些不用？
+- 九 (line 781)：逐策略分析 + 总结矩阵
+
+### Q: Metadata（元数据）怎么设计的？有哪些字段？
+- 十一.1 (line 896)：Ragent chunk 完整元数据
+- 十一.2 (line 926)：博客 7 字段 vs Ragent 对照
+- 十一.4 (line 979)：每个 chunker 注入的字段对照表
+- 十一.5 (line 1018)：元数据完整生命周期图
+- 十一.7 (line 1081)：做对了什么、缺了什么
+
+### Q: 面试时怎么讲 Chunking？
+- 十 (line 854)：4 个高频问题的标准回答模板
