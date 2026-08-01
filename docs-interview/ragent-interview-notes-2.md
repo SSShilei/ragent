@@ -1254,3 +1254,128 @@ while (!taskComplete && iterations < maxIterations) {
 > 之所以不搞 Agent loop，是因为企业场景以确定性交互为主。用户问'年假几天''北京天气''订单状态'，都是一次问答即可完成。Agent loop 的多步推理收益不大，但延迟加倍、成本不可控。
 >
 > 我们的 Agentic 体现在四个层面：第一，通过 MCP 协议自动发现和注册远程工具；第二，意图分类时 LLM 自主判断该走检索还是工具调用还是闲聊；第三，工具参数由 LLM 从自然语言中提取；第四，KB 和 MCP 结果在最终 Prompt 中融合，LLM 综合双方信息生成答案。这是一种**务实的 Agentic 设计**——在保证确定性和性能的前提下，最大化自动化能力。"
+
+---
+
+## 二十一、Query 决策树分析 — Ragent 的实现情况
+
+### 21.1 理论决策树 vs Ragent 实际实现
+
+将业界常见的 RAG Query 预处理决策树与 Ragent 代码逐节点对比：
+
+```
+理论决策树                            Ragent 实现情况
+══════════                           ════════════════
+含精确数字/人名/型号/日期？
+  ├─ 是 → metadata filter           ❌ 未显式实现
+  └─ 否 → 继续
+
+Query 质量差（口语化/缩写/错别字）？
+  ├─ 是 → Query 改写                ✅ MultiQuestionRewriteService
+  └─ 否 → 继续
+
+问题过于具体，缺背景知识？
+  ├─ 是 → Step-back                 ❌ 未实现
+  └─ 否 → 继续
+
+Query 很短（<10字）或零样本？
+  ├─ 是 → HyDE                      ❌ 未实现
+  └─ 否 → 继续
+
+问题多义/歧义/多跳？
+  ├─ 是 → Multi-Query               ⚠️ 部分实现
+  └─ 否 → 直接检索
+```
+
+搜索 `HyDE`、`StepBack`、`step-back`、`step_back`、`MultiQuery` 在代码库中**零命中**。这三种策略 Ragent 当前完全未实现。
+
+### 21.2 已实现的部分
+
+#### ✅ Query 改写（覆盖决策树的第二层）
+
+**代码入口**：`MultiQuestionRewriteService.rewriteWithSplit()`
+
+```java
+// 两阶段处理
+1. 术语归一化（QueryTermMappingService.normalize()）— DB 规则 + Redis 缓存
+2. LLM 改写 + 拆分（callLLMRewriteAndSplit()）— 调 LLM
+
+// 提示词 user-question-rewrite.st 覆盖了决策树列举的所有退化场景：
+- 口语化：   "报销咋整" → "报销流程"
+- 缩写：     术语归一化映射 "平安保司" → "平安保险公司"
+- 错别字：   LLM 自动纠错
+- 指代消解：  "它的数据库" → 结合历史还原为 "OA系统的数据库"
+- 多问句拆分："A怎么用？B呢？" → ["A怎么用", "B怎么用"]
+```
+
+**配置开关**：`rag.query-rewrite.enabled: true`。关闭时走纯规则兜底（术语归一化 + 按标点分隔符切分）。
+
+#### ⚠️ 歧义引导 + 拆分（部分覆盖决策树的第五层）
+
+**歧义引导**：`IntentGuidanceService.detectAmbiguity()` — 当意图分类遇到同名主题跨系统歧义时，推送选项让用户选择而非自动拆成多个 query。
+
+**拆分逻辑**：改写的 `should_split` 判断 + 规则兜底的 `ruleBasedSplit()`。但拆分只用于"一个用户问题包含多个独立子问题"的显式场景，不存在 Multi-Query 的"对同一问题生成多种表述并行检索"的策略。
+
+### 21.3 未实现的部分 — 为什么？
+
+| 策略 | 为什么没实现 | 对 Ragent 当前场景的影响 |
+|:---|:---|:---|
+| **metadata filter 预判** | 精确匹配依赖 BM25 关键词通道（天然对数字/ID/人名敏感），不需要前置判断 | 低影响。关键词通道已覆盖精确匹配场景 |
+| **Step-back** | 需要额外一次 LLM 调用生成"后退问题"，延迟翻倍。企业知识库通常结构良好，用户问题很少缺背景知识 | 低影响。意图树的三层结构（DOMAIN→CATEGORY→TOPIC）等效于"向上抽象" |
+| **HyDE** | 企业对延迟敏感，HyDE 需要 LLM 先生成假设答案再检索，两阶段延迟不可接受 | 中影响。零样本或极短 query 时检索效果确实不如 HyDE |
+| **Multi-Query** | 多条 query 的并行检索等同于多个意图并行分类 → 多路检索。不需要额外生成变体 | 低影响。意图拆分类似效果，但不覆盖同义变体检索 |
+
+**面试话术**：
+> "这个决策树很全面，但实际落地要考虑延迟和成本。Ragent 的设计原则是'**用意图路由替代盲目改写**'——Query 改写只做一轮（清理口语化+拆分），不做 HyDE（生成假设答案再检索，两轮 LLM 延迟不可接受），不做 Step-back（意图树的三层结构天然提供了向上抽象的路径），也不做 Multi-Query 变体生成（多个同义 query 同时检索的效果 ≈ 多路检索中的全局向量+关键词双保险）。用户如果有极短 query（如'年假'），意图分类能自动命中'人事制度'节点，collection 路由确保检索范围精准，不需要 HyDE 来弥补 query 信息的不足。"
+
+### 21.4 Ragent 的实际 Query 处理决策树
+
+对照代码，Ragent 的实际决策路径是：
+
+```
+用户 Query 进来
+  │
+  ▼
+术语归一化（QueryTermMappingService）
+  规则级：DB/Redis 缓存映射表，"平安保司"→"平安保险公司"
+  │
+  ▼
+queryRewriteEnabled？
+  ├─ false → 规则拆分（按标点切）→ 跳到意图分类
+  └─ true  → LLM 改写 + 拆分（一次 LLM 调用完成所有清理）
+             ├─ LLM 失败 → 规则拆分兜底
+             └─ LLM 成功 → 拿到 rewrittenQuestion + subQuestions
+  │
+  ▼
+意图分类（每个子问题并行调 LLM）
+  ├─ KB 意图   → collection 路由 + 多路检索
+  ├─ MCP 意图  → 工具参数提取 + 工具调用
+  └─ SYSTEM 意图 → 直接 LLM 回复
+
+对比理论的 5 层决策树，Ragent 实际只有 2 层：
+  第 1 层：术语归一化（规则）
+  第 2 层：LLM 改写 + 拆分（一次调用覆盖口语化/缩写/错别字/指代消解/多问句拆分）
+  
+这 2 层后直接进入意图分类 → 检索/工具调用。
+```
+
+### 21.5 如果要在 Ragent 中补齐这些策略
+
+| 策略 | 实现复杂度 | 延迟影响 | 实现建议 |
+|:---|:---|:---|:---|
+| **metadata filter 预判** | 低 | 极低（规则判断） | 加一个 regex 预判：含数字/日期/ID 模式 → 关键词通道 topK 加倍，因为精确匹配场景 BM25 比向量更准 |
+| **HyDE** | 中 | **高（+一次 LLM）** | 作为可选增强，配置开关 `rag.query.hyde-enabled: false`（默认关闭）。只有当 `queryRewriteEnabled=false` 且 query 字符数 < 阈值时才触发 |
+| **Step-back** | 中 | **高（+一次 LLM）** | 利用现有的意图树路径信息。"后退"不需要 LLM——意图节点向上回溯父节点就是概念抽象。如被分类为 biz-oa-intro，父节点 biz-oa 的 description 就是"OA系统"，直接用于全库检索补充 |
+| **Multi-Query** | 低 | 中（并行检索翻倍） | 改写阶段如果 LLM 返回 `should_split=false` 但 query 含歧义词，额外生成 1-2 个同义变体。与主 query 一起走多路检索，增加召回覆盖率 |
+
+### 21.6 面试话术模板
+
+> "你发的这个 Query 决策树很经典，覆盖了 HyDE、Step-back、Multi-Query 等常见优化策略。Ragent 的实现是其中的一个简化版——我们只做了两件事：规则级的术语归一化 + LLM 级别的改写拆分。其他层没有实现的原因主要是三个：
+>
+> 第一，**意图路由替代了 HyDE 和 Step-back**。HyDE 的本质是弥补短 query 的信息不足，但我们有三层意图树——用户说'年假'，意图分类能自动命中'人事制度→考勤→年假'这个路径，路由到精准的 collection，不需要 HyDE 生成假设文章。
+>
+> 第二，**延迟预算不允许两轮 LLM**。企业对问答延迟的容忍度通常在 3 秒内。一次 LLM 改写（~500ms）+ 一次 LLM 意图分类（~300ms）+ 检索（~200ms）+ LLM 生成（~2s）已经接近上限。再加 HyDE 或 Step-back 会再叠加一轮 LLM，用户体感明显。
+>
+> 第三，**关键词通道弥补了精确匹配的不足**。BM25 对订单号、错误码、人名的精确匹配天然优于向量，不需要额外的 metadata filter 预判。
+>
+> 如果未来要补齐，优先级是 Multi-Query > metadata filter > Step-back > HyDE。Multi-Query 实现成本最低（改写阶段多生成几个同义变体），metadata filter 是纯规则零延迟，HyDE 最重但零样本场景效果最好。"
