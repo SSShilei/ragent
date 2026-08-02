@@ -109,11 +109,11 @@ public class MarkdownDocumentParser implements DocumentParser {
 
     @Override
     public boolean supports(String mimeType) {
-        return mimeType != null && (
-                mimeType.equals("text/markdown") ||
-                        mimeType.equals("text/x-markdown") ||
-                        mimeType.equals("text/plain")
-        );
+        if (mimeType == null) {
+            return false;
+        }
+        String lower = mimeType.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("markdown") || lower.equals("text/plain");
     }
 
     private static String extractSourceFile(Map<String, Object> options) {

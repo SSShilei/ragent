@@ -666,27 +666,31 @@ public enum ChunkingMode {
 
 ### 阶段 1：MarkdownDocumentParser → ParsedDocument
 
-commonmark-java 解析 AST，`BlockExtractingVisitor` 遍历产出 12 个 Block：
+commonmark-java 解析 AST，`BlockExtractingVisitor` 遍历产出 12 个 Block。
+
+每个 Block 都携带 3 个公共字段：`id`（UUID）、`provenance`（`{"sourceFile":"员工手册.md","sheetName":null}`）、`outlinePath`（解析阶段为 `[]`，ChunkerNode 阶段由 HeadingHandler 注入）。以下展示各 Block 的类型专属字段：
 
 ```json
 {
   "blocks": [
-    {"@type":"heading", "level":1, "text":"员工手册"},
-    {"@type":"heading", "level":2, "text":"第一章 入职流程"},
-    {"@type":"paragraph", "text":"新员工入职需要完成以下步骤。"},
-    {"@type":"heading", "level":3, "text":"1.1 准备材料"},
-    {"@type":"paragraph", "text":"请准备以下材料："},
-    {"@type":"list", "ordered":false, "items":["身份证原件及复印件","学历证书复印件","一寸照片 2 张"]},
-    {"@type":"heading", "level":3, "text":"1.2 薪资结构"},
-    {"@type":"table", "headers":["级别","基本工资","绩效系数"], "rows":[["P6","15000","1.2"],["P7","22000","1.5"],["P8","32000","2.0"]]},
-    {"@type":"paragraph", "text":"新人第一年按80%发放。"},
-    {"@type":"heading", "level":2, "text":"第二章 考勤制度"},
-    {"@type":"paragraph", "text":"考勤规则如下："},
-    {"@type":"list", "ordered":true, "items":["工作日 9:00-18:00","迟到 30 分钟内不扣薪","每月 3 次免打卡机会"]}
+    {"@type":"heading",  "id":"uuid-01", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "level":1, "text":"员工手册"},
+    {"@type":"heading",  "id":"uuid-02", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "level":2, "text":"第一章 入职流程"},
+    {"@type":"paragraph","id":"uuid-03", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "text":"新员工入职需要完成以下步骤。"},
+    {"@type":"heading",  "id":"uuid-04", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "level":3, "text":"1.1 准备材料"},
+    {"@type":"paragraph","id":"uuid-05", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "text":"请准备以下材料："},
+    {"@type":"list",     "id":"uuid-06", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "ordered":false, "items":["身份证原件及复印件","学历证书复印件","一寸照片 2 张"]},
+    {"@type":"heading",  "id":"uuid-07", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "level":3, "text":"1.2 薪资结构"},
+    {"@type":"table",    "id":"uuid-08", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "headers":["级别","基本工资","绩效系数"], "rows":[["P6","15000","1.2"],["P7","22000","1.5"],["P8","32000","2.0"]]},
+    {"@type":"paragraph","id":"uuid-09", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "text":"新人第一年按80%发放。"},
+    {"@type":"heading",  "id":"uuid-10", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "level":2, "text":"第二章 考勤制度"},
+    {"@type":"paragraph","id":"uuid-11", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "text":"考勤规则如下："},
+    {"@type":"list",     "id":"uuid-12", "provenance":{"sourceFile":"员工手册.md","sheetName":null}, "outlinePath":[], "ordered":true, "items":["工作日 9:00-18:00","迟到 30 分钟内不扣薪","每月 3 次免打卡机会"]}
   ],
   "metadata": {"parser":"Markdown","mimeType":"text/markdown","blocks":12}
 }
 ```
+
+> **注意 `outlinePath` 在解析阶段全是空列表**。因为 Parser 不知道文档结构——它只是逐个解析 Block，不做跨 Block 的层级追踪。`outlinePath` 的注入时机在下一阶段：ChunkerNode 遍历 Block 列表时由 HeadingHandler 累积后注入到每个 chunk 的元数据中。
 
 ### 阶段 2：StructuredChunkingService → BlockAwareChunkerDispatcher 分发
 
