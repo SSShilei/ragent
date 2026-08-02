@@ -1,6 +1,6 @@
 # PowerAgent 文档索引
 
-> `/home/shilei/IdeaProjects/ragent/poweragent-doc/` 下共 16 个 Markdown 文档（已去重）。
+> `/home/shilei/IdeaProjects/ragent/doc-poweragent/` 下共 16 个文档（已去重）。
 > 使用方式：搜索关键词定位到对应文件，再根据行号精确定位。
 
 ---
@@ -24,7 +24,7 @@
 | `模块源码分析 05-08：插件_工具 + MCP + 记忆 + 多模态 (1).md` | 1835 | 插件网关/MCP集成/Mem0记忆/多模态，面试20问 |
 | `模块源码分析 09-10：Trace_日志 + 评测体系 + Sentinel 熔断 + 部署性能并发 (1).md` | 1553 | 全链路Trace/RAGAS评测/Sentinel熔断/部署并发 |
 | `DataFlow-Server 源码分析.md` | 1629 | DataFlow 离线引擎（Argo+K8s+双层状态机+存储入库） |
-| `Agent表结构.md` | 434 | mx_agentflow 库 14 张表完整 DDL |
+| `Agent表结构.sql` | 434 | mx_agentflow 库 14 张表完整 DDL |
 
 ### 基础架构
 | 文档 | 行数 | 核心内容 |
