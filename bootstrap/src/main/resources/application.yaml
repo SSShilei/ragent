@@ -85,12 +85,17 @@ rag:
 
   default:
     collection-name: rag_default_store
-    dimension: 1536
+    dimension: 1024
     metric-type: COSINE
     sse-timeout-ms: 300000  # SSE 全局超时（毫秒），默认 5 分钟
 
   query-rewrite:
     enabled: true
+
+  multi-query:
+    enabled: false          # 默认关闭，按需开启。短 query 或模糊 query 场景效果显著
+    max-variants: 3         # 最大变体数量（不含原始 rewrite）
+    min-query-chars: 10     # query 字符数低于此值触发扩展，超过跳过
 
   rerank:
     enabled: true
@@ -193,8 +198,8 @@ ai:
         chat: /compatible-mode/v1/chat/completions
         rerank: /api/v1/services/rerank/text-rerank/text-rerank
     aihubmix:
-      url: https://aihubmix.com
-      api-key: ${AIHUBMIX_API_KEY:}
+      url: https://api.deepseek.com
+      api-key: ${DEEPSEEK_API_KEY:}
       endpoints:
         chat: /v1/chat/completions
         embedding: /v1/embeddings
@@ -204,6 +209,12 @@ ai:
       endpoints:
         chat: /v1/chat/completions
         embedding: /v1/embeddings
+    gitee:
+      url: https://ai.gitee.com
+      api-key: ${GITEE_API_KEY:YOUR_GITEE_API_KEY}
+      endpoints:
+        embedding: /v1/embeddings
+        rerank: /v1/rerank
 
   selection:
     failure-threshold: 2
@@ -213,38 +224,33 @@ ai:
     message-chunk-size: 1
 
   chat:
-    default-model: qwen-plus
+    default-model: deepseek-v4-flash
     deep-thinking-model: qwen3-max
     candidates:
+      - id: deepseek-v4-flash
+        provider: aihubmix
+        model: deepseek-v4-flash
+        priority: 1
       - id: qwen-plus
         provider: bailian
         model: qwen-plus-latest
-        priority: 1
+        priority: 2
       - id: qwen3-local
         provider: ollama
         model: qwen3:8b-fp16
-        priority: 2
+        priority: 3
       - id: qwen3-max
         provider: bailian
         model: qwen3-max
         supports-thinking: true
-        priority: 3
-      - id: glm-4.7
-        provider: siliconflow
-        model: Pro/zai-org/GLM-4.7
-        supports-thinking: true
         priority: 4
-      - id: gpt-5.4
-        provider: aihubmix
-        model: gpt-5.4
-        priority: 5
 
   embedding:
-    default-model: qwen-emb-8b
+    default-model: qwen-emb-4b
     candidates:
-      - id: qwen-emb-8b
-        provider: siliconflow
-        model: Qwen/Qwen3-Embedding-8B
+      - id: qwen-emb-4b
+        provider: gitee
+        model: Qwen3-Embedding-4B
         dimension: ${rag.default.dimension}
         priority: 1
       - id: qwen-emb-local
@@ -252,18 +258,13 @@ ai:
         model: qwen3-embedding:8b-fp16
         dimension: ${rag.default.dimension}
         priority: 2
-      - id: text-embedding-3-large
-        provider: aihubmix
-        model: text-embedding-3-large
-        dimension: ${rag.default.dimension}
-        priority: 3
 
   rerank:
     default-model: qwen3-rerank
     candidates:
       - id: qwen3-rerank
-        provider: bailian
-        model: qwen3-rerank
+        provider: gitee
+        model: Qwen3-Reranker-4B
         priority: 1
       - id: rerank-noop
         provider: noop
