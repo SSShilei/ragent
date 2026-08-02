@@ -115,4 +115,21 @@ public class VectorChunk {
      * 例如 TableChunker 把 sheetName + 表头摘要写入此字段，LLM 看到切碎的表格行也有上下文
      */
     private String sectionContext;
+
+    /**
+     * 实际生成 {@link #embedding} 的 Embedding 模型 ID（候选 model id，如 qwen-emb-8b）
+     * <p>
+     * 记录用途：切换 Embedding 模型时可据此字段精确定位旧模型建的 chunk，
+     * 选择性重建索引，避免新/旧向量维度混在一起导致相似度计算错乱。
+     * 由 {@link com.nageoffer.ai.ragent.core.chunk.ChunkEmbeddingService} 在嵌入阶段写入
+     */
+    private String embeddingModel;
+
+    /**
+     * 实际生成 {@link #embedding} 时的向量维度（与模型当时输出对齐）
+     * <p>
+     * 不直接从 {@link #embedding}.length 取，是为了让 metadata 落库时维度成为可被 SQL
+     * 直接 filter 的元数据值，方便排查"维度混库"事故
+     */
+    private Integer embeddingDim;
 }

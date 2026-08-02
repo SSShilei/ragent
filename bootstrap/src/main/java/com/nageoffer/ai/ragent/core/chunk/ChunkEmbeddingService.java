@@ -55,6 +55,14 @@ public class ChunkEmbeddingService {
                 ? embeddingService.embedBatch(texts, embeddingModel)
                 : embeddingService.embedBatch(texts);
         applyEmbeddings(chunks, vectors);
+
+        // 记录每个 chunk 由哪个模型、什么维度生成，使后续切换模型时可定位旧 chunk 精准重建
+        String modelId = StringUtils.hasText(embeddingModel) ? embeddingModel : null;
+        int dim = embeddingService.dimension();
+        for (VectorChunk chunk : chunks) {
+            chunk.setEmbeddingModel(modelId);
+            chunk.setEmbeddingDim(dim);
+        }
     }
 
     /**

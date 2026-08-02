@@ -207,6 +207,12 @@ public class MilvusVectorStoreService implements VectorStoreService {
         // collection_name 已提升为顶层标量字段，不再冗余写入 metadata
         metadata.addProperty("doc_id", docId);
         metadata.addProperty("chunk_index", chunk.getIndex());
+        if (chunk.getEmbeddingModel() != null) {
+            metadata.addProperty("embedding_model", chunk.getEmbeddingModel());
+        }
+        if (chunk.getEmbeddingDim() != null) {
+            metadata.addProperty("embedding_dim", chunk.getEmbeddingDim());
+        }
         return metadata;
     }
 

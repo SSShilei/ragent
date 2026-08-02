@@ -106,6 +106,12 @@ public class PgVectorStoreService implements VectorStoreService {
 
         meta.put("doc_id", docId);
         meta.put("chunk_index", chunk.getIndex());
+        if (chunk.getEmbeddingModel() != null) {
+            meta.put("embedding_model", chunk.getEmbeddingModel());
+        }
+        if (chunk.getEmbeddingDim() != null) {
+            meta.put("embedding_dim", chunk.getEmbeddingDim());
+        }
         try {
             return objectMapper.writeValueAsString(meta);
         } catch (Exception e) {
