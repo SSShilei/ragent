@@ -99,4 +99,14 @@ public class RAGConfigProperties {
      */
     @Value("${rag.multi-query.min-query-chars:10}")
     private Integer multiQueryMinQueryChars;
+
+    /**
+     * 精确实体短路开关
+     * <p>
+     * query 命中精确数字/型号/日期等实体时直接跳过 LLM 改写，
+     * 走原始 query（仅做术语归一化）+ 规则拆分，避免把含具体值的 query 改写跑偏
+     * 默认开启
+     */
+    @Value("${rag.query-rewrite.exact-entities-bypass:true}")
+    private Boolean exactEntitiesBypass;
 }

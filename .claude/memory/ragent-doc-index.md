@@ -314,6 +314,8 @@
 - 三.5：变体扩展触发条件（短 query ≤10 字符才触发）
 - 三.6：变体生成 details（T=0.7 买多样性，原始 rewrite 排第一）
 - 三.7：**Multi-Query 改造前后对比**（数据模型/重写/检索/核心差异表）+ 面试话术
+- 三.8：**Query 决策树第一档：精确实体短路**（ExactEntityDetector 正则设计 + maybeBypassForExactEntity 实现 + 6 个关键设计决策 + 测试覆盖 + 面试话术）
+- 三.9：**Ragent 当前 Query 决策树完整版**（6 档流程图 + 与业界决策树对照矩阵 + 5 个特点 + Q&A：为什么没 Step-back/HyDE）
 
 ### Q: RAGChatServiceImpl 实现的是哪个对话？
 - 四：用户问答 SSE 流式对话；RAGChatServiceImpl 是事务边界（限流+Trace+SSE），流水线大脑在 StreamChatPipeline

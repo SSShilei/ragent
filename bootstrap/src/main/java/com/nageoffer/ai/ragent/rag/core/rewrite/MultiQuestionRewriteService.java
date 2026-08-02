@@ -53,6 +53,7 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
     private final RAGConfigProperties ragConfigProperties;
     private final QueryTermMappingService queryTermMappingService;
     private final PromptTemplateLoader promptTemplateLoader;
+    private final ExactEntityDetector exactEntityDetector;
 
     @Override
     @RagTraceNode(name = "query-rewrite", type = "REWRITE")
@@ -68,6 +69,12 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
     @Override
     @RagTraceNode(name = "query-rewrite-and-split", type = "REWRITE")
     public RewriteResult rewriteWithSplit(String userQuestion, List<ChatMessage> history) {
+        // 精确实体短路：含数字/型号/日期等强实体的 query 不走 LLM 改写，避免泛化跑偏
+        RewriteResult bypassed = maybeBypassForExactEntity(userQuestion);
+        if (bypassed != null) {
+            return bypassed;
+        }
+
         if (!ragConfigProperties.getQueryRewriteEnabled()) {
             String normalized = queryTermMappingService.normalize(userQuestion);
             List<String> subs = ruleBasedSplit(normalized);
@@ -82,9 +89,36 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
     }
 
     /**
+     * 精确实体短路（决策树第一档）
+     * <p>
+     * 开启且命中年执行：仅做术语归一化 + 规则拆分，跳过 LLM 改写与变体扩展
+     * 精确实体 query 语义自包含，生成变体反而稀释召回
+     *
+     * @return 短路 RewriteResult，未命中或开关关返回 null
+     */
+    private RewriteResult maybeBypassForExactEntity(String userQuestion) {
+        if (!Boolean.TRUE.equals(ragConfigProperties.getExactEntitiesBypass())) {
+            return null;
+        }
+        if (!exactEntityDetector.hasExactEntity(userQuestion)) {
+            return null;
+        }
+        String normalized = queryTermMappingService.normalize(userQuestion);
+        List<String> subs = ruleBasedSplit(normalized);
+        RewriteResult bypassed = new RewriteResult(normalized, subs);
+        log.info("精确实体短路命中，跳过 LLM 改写与变体扩展 - 原始 query='{}' 归一化='{}'", userQuestion, normalized);
+        return bypassed;
+    }
+
+    /**
      * 先用默认改写做归一化，再进行多问句拆分。
      */
     private RewriteResult rewriteAndSplit(String userQuestion) {
+        // 精确实体短路：命中跳过 LLM 改写与变体扩展（与带 history 的入口行为一致）
+        RewriteResult bypassed = maybeBypassForExactEntity(userQuestion);
+        if (bypassed != null) {
+            return bypassed;
+        }
         // 开关关闭：直接做规则归一化 + 规则拆分
         if (!ragConfigProperties.getQueryRewriteEnabled()) {
             String normalized = queryTermMappingService.normalize(userQuestion);

@@ -91,6 +91,7 @@ rag:
 
   query-rewrite:
     enabled: true
+    exact-entities-bypass: true   # 决策树第一档：含精确数字/型号/日期的 query 跳过 LLM 改写，避免泛化跑偏
 
   multi-query:
     enabled: false          # 默认关闭，按需开启。短 query 或模糊 query 场景效果显著

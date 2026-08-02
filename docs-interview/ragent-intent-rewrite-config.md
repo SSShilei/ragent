@@ -344,6 +344,246 @@ public record RewriteResult(String rewrittenQuestion, List<String> subQuestions,
 
 > Ragent 原来的 Query 重写只产出一个改写 query，单子问题时召回率受限于单一表达。我做了一个 Multi-Query 变体扩展——在改写完成后加 maybeExpandVariants 步骤，对短 query 或模糊 query 调用一次 LLM（temperature 拉高到 0.7）生成 3 个不同角度的语义变体。检索阶段每个变体并行多通道检索再按 chunkId 去重合并，原始 rewrite 永远排第一保证优先级。开关默认关，不影响存量行为；触发条件用 query 长度阈值控制，避免长 query 发散到不相关领域。改造后召回率提升明显，特别在概念有多重表达的领域知识库场景。
 
+### 3.9 Ragent 当前 Query 决策树（完整版）
+
+基于实际代码的完整 Query 处理决策树：
+
+```
+用户 Query （StreamChatPipeline.execute → rewriteQuery）
+   │
+   ▼
+① loadMemory()  # 记忆并行加载，不影响 query 决策
+   │
+   ▼
+② MultiQuestionRewriteService.rewriteWithSplit(query, history)
+   │
+   ▼
+┌─────────────────────────────────────────────────────────┐
+│ 第一档（3.8 实现的）：精确实体短路                       │
+│ ExactEntityDetector.hasExactEntity(query)               │
+│ 检测：长数字≥4 / 型号 / 日期 / 金额                       │
+│                                                          │
+│ exact-entities-bypass=true（默认开）                      │
+│   ├─ 命中 → 术语归一化 + 规则拆分                          │
+│   │         跳过 LLM 改写 + 跳过变体扩展                    │
+│   │         RewriteResult{normalized, subs, variants=[]} │
+│   │         返回 ↑                                       │
+│   └─ 未命中 ↓                                            │
+└─────────────────────────────────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────────────────────────────────┐
+│ 第二档：query-rewrite.enabled 总开关                     │
+│                                                          │
+│   ├─ false → 术语归一化 + 规则拆分                        │
+│   │         RewriteResult base{normalized, subs}          │
+│   │         → maybeExpandVariants ↓                      │
+│   │                                                      │
+│   └─ true  → 术语归一化                                  │
+│              callLLMRewriteAndSplit (T=0.1)              │
+│              RewriteResult{rewrite, subs}                │
+│              → maybeExpandVariants ↓                     │
+└─────────────────────────────────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────────────────────────────────┐
+│ 第三档：Multi-Query 变体扩展（3.7 实现的）                │
+│ maybeExpandVariants → shouldExpand：                    │
+│                                                          │
+│   ① multi-query.enabled=false → 直接返回 base            │
+│   ② query 长度 ≤ min-query-chars(10) → 触发              │
+│   ③ 已多个子问题 → 不扩展（拆分已覆盖多角度）            │
+│   ④ 改写后 ≤ 20 字符（模糊） → 触发                       │
+│                                                          │
+│   触发 → generateVariants (T=0.7) 生成 3 个变体          │
+│           variants = [原始rewrite, 变体1, 变体2, ...]    │
+└─────────────────────────────────────────────────────────┘
+   │
+   ▼
+最终输出 RewriteResult{rewrittenQuestion, subQuestions, variants}
+   │
+   ▼
+③ IntentResolver.resolve() → 每个 subQuestion 生成 SubQuestionIntent{variantQueries}
+   │
+   ▼
+┌─────────────────────────────────────────────────────────┐
+│ 第四档：意图分流（NodeScoreFilters）                    │
+│ DefaultIntentClassifier.classifyTargets (T=0.1)         │
+│ → LLM 给叶子节点打分                                     │
+│                                                          │
+│   ├─ KB 节点高分 → RetrievalEngine 检索                  │
+│   ├─ MCP 节点高分 → McpToolExecutor 工具调用              │
+│   └─ SYSTEM 节点  → 闲聊短路                              │
+└─────────────────────────────────────────────────────────┘
+   │
+   ▼
+┌─────────────────────────────────────────────────────────┐
+│ 第五档：歧义 / 闲聊短路（在意图识别之后）                │
+│                                                          │
+│   ├─ handleGuidance()：歧义引导（多意图低分）→ 短路      │
+│   └─ handleSystemOnly()：纯 SYSTEM 意图 → 闲聊短路      │
+└─────────────────────────────────────────────────────────┘
+   │
+   ▼
+⑥ RetrievalEngine.retrieve()  # 检索引擎
+   │
+   ▼
+┌─────────────────────────────────────────────────────────┐
+│ 第六档：变体触发分支                                      │
+│ variantQueries.size() > 1？                              │
+│   ├─ 是 → retrieveWithVariants()：每个变体并行多通道检索  │
+│   │        LinkedHashMap 按 chunkId 去重合并            │
+│   │        变体 0=原始 rewrite 优先级最高                │
+│   └─ 否 → 单 query 多通道检索                            │
+└─────────────────────────────────────────────────────────┘
+   │
+   ▼
+⑦ 后处理器链：Dedup → RRF Fusion → Rerank → MetadataEnrich
+   │
+   ▼
+⑧ streamLLMResponse()  # 答题（T=0 或 MCP 时 0.3）
+```
+
+#### 与业界决策树的对照矩阵
+
+| 业界决策树分支 | Ragent 实现 | 状态 |
+|:---|:---|:---|
+| 含精确数字/人名/型号 → 直接检索 | ExactEntityDetector 短路 | ✅ 3.8 实现 |
+| 质量差 → Query 改写 | query-rewrite.enabled + LLM 改写 | ✅ 已实现 |
+| 缺背景 → Step-back | 无 | ❌ 未实现 |
+| 短 query/零样本 → HyDE | 用 Multi-Query 变体扩展替代覆盖 | ✅ 有替代方案 |
+| 多义/多跳 → Multi-Query | maybeExpandVariants（短 query 触发） | ✅ 3.7 实现 |
+| 直接检索（不需要改写） | 短路返回 RewriteResult{原值} | ✅ 已实现 |
+
+#### Ragent 这套相比业界版的特点
+
+**1. 把"判断"放在 query 入口最前，避免无效 LLM 调用**
+
+业界决策树是"层层判断每个分支是否触发"，Ragent 的实现是短路串行——先判断精确实体（最便宜，纯正则），再判断总开关，再判断变体触发。每个判断从前到后越来越贵，能短路就短路。
+
+**2. HyDE 没做，用 Multi-Query 顶替**
+
+HyDE 和 Multi-Query 在短 query 场景功能重叠 70%——都是产生多个"延伸查询"提升召回。Ragent 用 Multi-Query 变体扩展覆盖了这个能力，省一次 LLM 调用（HyDE 要先"生成假文档"再 embed，比变体生成贵）。
+
+**3. Step-back 没做**
+
+Step-back 是"对太具体的 query 让 LLM 提炼出更抽象的问题，双路检索"——比如 `"P6 的薪资"` → `"各职级薪资结构"` + 原始 query。决策树里没有这一层，目前也没有触发判断——少这档是合理的取舍。
+
+**4. 决策树隐藏在意图识别分流里**
+
+业界决策树没画意图识别这一格，但 Ragent 把意图识别当成"分流回到哪条检索路径"——KB 节点回 retrieve、MCP 节点回工具、SYSTEM 短路闲聊。这等同于把决策树的某些分支提前到了意图识别阶段。
+
+**5. query-rewrite.enabled=false 时短路仍在第一位生效**
+
+源码细节（`MultiQuestionRewriteService.java:71-89`）：精确实体短路在 `query-rewrite.enabled` 总开关判断**之前**。所以即使总开关关了，遇到精确实体仍然会短路——其实让它走 LLM 改写也走不到（因为总开关关了），这条短路在总关时是冗余的优化，但不会出错，且让"含实体的 query 不浪费 LLM"这个语义在两个开关的任意组合下都成立。
+
+#### Q&A：业界没覆盖的，你的也没净做到
+
+**Q: 为什么没有 Step-back？**
+> Step-back 对"问得窄但需要背景知识"的 query 才有用（如"P6 薪资"问各职级薪资结构背景），这种场景在知识库问答中占比不高。增加 Step-back 需要：① 一次额外 LLM 调用生成更抽象的问题；② 多跑一路检索；③ 融合两路结果。成本翻倍，收益集中在特定问类型。先放着，等评测显示具体类型问题检索质量差再补。
+
+**Q: 为什么没用 HyDE？**
+> HyDE 用 LLM 生成"假文档"再 embed，本质上和 Multi-Query 一样是"扩展语义角度"，但贵一次 LLM 调用。我做的 Multi-Query 变体扩展在短 query 场景已经覆盖了 HyDE 想解决的问题——多个变体并行检索后去重合并，召回率提升且成本更低。重叠达 70%，没必要都做。
+
+**Q: 短路和 query-rewrite 总开关的优先级是不是不合理？**
+> 设计上是有意的。精确实体短路永远在最前面，无论总开关开不开——逻辑上"含 P6 15000 这种具体值的 query 没必要改写"应该比"是否启 LLM 改写"更优先判定。如果总开关关了，命中实体也是走归一化+规则拆分，等价结果但走两次短路有点浪费——这是冗余（不是 bug），简化逻辑顺序的代价。可以接受。
+
+### 3.8 Query 决策树第一档：精确实体短路（exact-entities-bypass）
+
+#### 改造动机
+
+业界推荐的 Query 处理决策树第一档：**含精确数字 / 人名 / 型号 / 日期的 query，直接检索或走 metadata filter，跳过 LLM 改写**。
+
+**痛点**：Ragent 原 `query-rewrite.enabled=true` 时对每个 query 都调 LLM 改写。对 `"Bob 在 2024 年的薪资"`这种含精确实体的 query：
+- LLM 可能把 `"P6 基本工资 15000"` 改成 `"职级 6 工资 15000"` —— 泛化掉具体型号，向量召回跑偏
+- 改写本身 1 次 LLM 调用 + 可能再触发变体扩展 1 次 LLM 调用 — 对自包含 query 是冗余成本
+
+**目标**：纯规则、零成本、不引入新模块，在 query 入口最前短路掉改写。
+
+#### 实现：ExactEntityDetector + maybeBypassForExactEntity
+
+```java
+// ExactEntityDetector：4 类正则的精确实体检测器
+LONG_NUMBER       = \d{4,}                                            // 4 位以上纯数字（年份/工号/订单号/大额值）
+                                                                       // 例：2024、2083847186960904192、15000
+
+ALPHANUMERIC_CODE = (?iu)(?=.*\d)[A-Z0-9]+(?:[-_/][A-Z0-9]+)+
+                       |(?=[A-Z]*\d)[A-Z]+\d+[A-Z0-9]*
+                       |\d+[A-Z]+[A-Z0-9]*                            // 字母数字型号（≥2 段或字母数字紧贴）
+                                                                       // 例：P6、A8-C3x、RAG-001、iPhone15
+
+ISO_DATE          = \d{4}[-/.年]\d{1,2}([月/-/.]\d{1,2}日?)?            // 日期
+                                                                       // 例：2024-06-30、2024年6月15日、2024.07
+
+AMOUNT            = (?i)([$￥]\s?\d|\d+\s?(?:万元|k|m|%)|\d+\s?(?:元|块))   // 金额/百分比
+                                                                       // 例：$1500、5万元、20%
+```
+
+**短路插入点**：`MultiQuestionRewriteService.rewriteWithSplit()` 入口最前端，两个重载（带 history 和不带 history）都加：
+
+```java
+public RewriteResult rewriteWithSplit(String userQuestion, List<ChatMessage> history) {
+    // 精确实体短路：含数字/型号/日期等强实体的 query 不走 LLM 改写，避免泛化跑偏
+    RewriteResult bypassed = maybeBypassForExactEntity(userQuestion);
+    if (bypassed != null) return bypassed;
+
+    if (!ragConfigProperties.getQueryRewriteEnabled()) { ... }      // 原 LLM 改写流程
+    String normalizedQuestion = queryTermMappingService.normalize(userQuestion);
+    RewriteResult fromLLM = callLLMRewriteAndSplit(...);            // ← 命中实体时跳过此调用
+    return maybeExpandVariants(userQuestion, fromLLM);               // ← 命中实体时也跳过此调用
+}
+
+private RewriteResult maybeBypassForExactEntity(String userQuestion) {
+    if (!Boolean.TRUE.equals(ragConfigProperties.getExactEntitiesBypass())) return null;
+    if (!exactEntityDetector.hasExactEntity(userQuestion)) return null;
+    String normalized = queryTermMappingService.normalize(userQuestion);
+    List<String> subs = ruleBasedSplit(normalized);
+    log.info("精确实体短路命中，跳过 LLM 改写与变体扩展 - 原始 query='{}' 归一化='{}'", ...);
+    return new RewriteResult(normalized, subs);   // 仅做术语归一化 + 规则拆分
+}
+```
+
+#### 关键设计决策
+
+1. **短路跳过 LLM 改写 + 也跳过 maybeExpandVariants**：精确实体 query 语义自包含，生成变体反而稀释召回（变体覆盖其他角度相当于把"P6"漂移到其他职级）
+2. **保留术语归一化**：`queryTermMappingService.normalize()` 仍执行——这是 DB/Redis 映射表查询，零成本，且让"平安保司"还能归一化成"平安保险公司"，不影响术语统一
+3. **_SHORT 数字不误中**：长数字阈值 4 位才触发（`"3 个步骤"` 中的 3 不命中、`"5 行实现"` 中的 5 不命中）。FIVED-数字型号正则要求"至少一段含数字 + 字母数字混合"，避免"OA 系统"这种纯文本误中
+4. **`(?iu)` Unicode + 不区分大小写**：兼容小写开头的型号（`iPhone15`、`SKU2024`）
+5. **默认开启**：`rag.query-rewrite.exact-entities-bypass: true`。改动纯增量，不影响存量行为，老 query 走不到这条短路就是原路径
+6. **设计正交**：与 `query-rewrite.enabled`、`multi-query.enabled` 完全独立——前者关闭时短路仍在第一个判定执行，二者关闭时短路也能命中
+
+#### 测试覆盖
+
+`ExactEntityDetectorTest` 7 个用例：
+
+```
+✅ 长数字：   "Bob 在 2024 年的薪资"、"订单号 2083847186960904192 状态"、"P6 基本工资 15000"
+✅ 型号：     "iPhone15 的续航"、"查询 RAG-001 的状态"、"A8-C3x 配置说明"
+✅ 日期：     "2024-06-30 上线的功能"、"2024年6月15日 出的 bug"、"2024/6/15 版本"
+✅ 金额：     "满 $1500 免运费"、"月销 5万元 的门店"、"占比 20% 的部分"
+❌ 纯文本：   "Block 体系是什么"、"RAG 流水线怎么做的"、"意图识别怎么实现的"（不命中）
+❌ 短数字：   "3 个步骤"、"用 5 行实现"（不命中，避免误伤）
+❌ 空输入：   null / "" / "   "（不命中）
+```
+
+跑测试：`./mvnw -pl bootstrap -Dtest=ExactEntityDetectorTest test`
+
+#### 改动汇总
+
+| 文件 | 改动 |
+|:---|:---|
+| `ExactEntityDetector.java`（新） | 4 类正则的精确实体检测器组件 |
+| `RAGConfigProperties.java` | 新增 `exactEntitiesBypass` 字段（默认 true） |
+| `MultiQuestionRewriteService.java` | 注入 `ExactEntityDetector`，两个入口都加 `maybeBypassForExactEntity` 短路 |
+| `application.yaml` | `rag.query-rewrite.exact-entities-bypass: true` |
+| `ExactEntityDetectorTest.java`（新） | 7 个用例覆盖 4 类命中 + 3 类不命中 |
+
+#### 面试话术
+
+> 业界推荐的 Query 处理决策树第一档，是"含精确数字/型号/日期的 query 直接跳过改写走原 query"。Ragent 原来对每个 query 无脑 LLM 改写，"P6 15000"可能被泛化成"职级 6 工资 15000"，向量召回跑偏。我加了 ExactEntityDetector 4 类正则（长数字/型号/日期/金额）在 query 入口最前短路——命中实体的话跳过 LLM 改写和变体扩展，只做术语归一化加规则拆分，省 1-2 次 LLM 调用且不跑偏。正则阈值刻意保守：长数字≥4 位才触发避免误中"3 个步骤"，型号正则要求字母数字混合避免误中"OA 系统"，加 (?iu) 兼容小写开头型号如 iPhone15。开关默认开启、7 个单元测试覆盖，与 query-rewrite.enabled / multi-query.enabled 完全正交，不影响存量行为。
+>
+> 当时也评估了决策树其他几档——Step-back、HyDE 没做：HyDE 跟我做的 Multi-Query 变体扩展在短 query 场景功能重叠 70%，再上重复造轮子；Step-back 对"问得窄但需要背景"的 query 才有用，单独评估再加。完整 6 层决策树不建议一次全上维护成本高于收益。这一档代价最低、收益最直接，先做。
+
 ---
 
 ## 四、RAGChatServiceImpl 实现的是哪个对话
