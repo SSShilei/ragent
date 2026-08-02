@@ -72,11 +72,7 @@ public class PgVectorRetrieverService implements VectorRetrieverService {
      * 单库与全局共用此方法：单库传单元素列表，全局传多元素列表
      */
     private List<RetrievedChunk> queryByCollections(float[] vector, List<String> collectionNames, int limit) {
-        // 提升召回率；迭代扫描保证过滤后仍能填满 LIMIT，消除过滤向量检索的召回悬崖（pgvector >= 0.8）
-        // noinspection SqlDialectInspection,SqlNoDataSourceInspection
-        jdbcTemplate.execute("SET hnsw.ef_search = 200");
-        // noinspection SqlDialectInspection,SqlNoDataSourceInspection
-        jdbcTemplate.execute("SET hnsw.iterative_scan = relaxed_order");
+        applyPgVectorHints();
 
         String vectorLiteral = toVectorLiteral(vector);
         String placeholders = collectionNames.stream().map(c -> "?").collect(java.util.stream.Collectors.joining(", "));
@@ -98,6 +94,25 @@ public class PgVectorRetrieverService implements VectorRetrieverService {
                         .build(),
                 args
         );
+    }
+
+    /**
+     * 设置 pgvector HNSW 检索提示（pgvector >= 0.8），老版本不支持则静默跳过。
+     * 这些 SET 语句是性能优化 hint，缺失不影响检索正确性。
+     */
+    private void applyPgVectorHints() {
+        try {
+            // noinspection SqlDialectInspection,SqlNoDataSourceInspection
+            jdbcTemplate.execute("SET hnsw.ef_search = 200");
+        } catch (Exception e) {
+            log.debug("pgvector 不支持 hnsw.ef_search，跳过", e);
+        }
+        try {
+            // noinspection SqlDialectInspection,SqlNoDataSourceInspection
+            jdbcTemplate.execute("SET hnsw.iterative_scan = relaxed_order");
+        } catch (Exception e) {
+            log.debug("pgvector 不支持 hnsw.iterative_scan，跳过", e);
+        }
     }
 
     private float[] normalize(float[] vector) {
