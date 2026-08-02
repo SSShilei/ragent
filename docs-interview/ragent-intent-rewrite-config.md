@@ -157,6 +157,68 @@ private String buildPrompt(List<IntentNode> leafNodes) {
 .thinking(false)
 ```
 
+### 2.2 意图识别不只用在检索中——四个消费点
+
+意图识别的结果（`List<NodeScore>`）在流水线里被用了四处，检索只是其中之一：
+
+```
+resolveIntents() 产出 List<SubQuestionIntent>
+   │
+   ├─ ① 歧义引导（短路）
+   │    handleGuidance()
+   │    多意图低分 → 反问用户"你是想问 A 还是 B？" → 直接 return
+   │    没有意图树 → 永远不会走这条短路
+   │
+   ├─ ② 闲聊短路
+   │    handleSystemOnly()
+   │    纯 SYSTEM 意图 → "这个问题不需要检索，直接 LLM 答"
+   │    没有意图树 → 永远不会走这条短路
+   │
+   ├─ ③ 检索引擎分流
+   │    NodeScoreFilters.kb(intent)   → KB 节点 → 定向或全局 retrieval
+   │    NodeScoreFilters.mcp(intent)  → MCP 工具调用（不检索，调用外部工具）
+   │    VectorSearchChannel 根据 KB intent 置信度选作用域：
+   │      ≥0.6 → 意图定向（收窄命中库）
+   │      <0.6 → 全局兜底（全库检索）
+   │
+   └─ ④ 答题 Prompt 拼装
+        PromptContext.kbIntents → prompt builder 注入"用户在问哪类问题"
+        PromptContext.mcpIntents → LLM 知道"我调了哪些工具 + 结果是什么"
+        → 答题阶段 LLM 理解用户意图类别，答得更精准
+```
+
+源码证据（`StreamChatPipeline.java:81-90`）：
+
+```java
+resolveIntents(ctx);           // 产出 intentGroup
+
+if (handleGuidance(ctx))       // ← ① 用 intentGroup 走歧义短路
+    return;
+if (handleSystemOnly(ctx))     // ← ② 用 intentGroup 走闲聊短路
+    return;
+
+RetrievalContext retrievalCtx = retrieve(ctx);  // ← ③ 用 intentGroup 分流 KB vs MCP
+```
+
+④ 在答题 Prompt 组装时（`StreamChatPipeline.java:211`）：
+
+```java
+PromptContext.builder()
+    .mcpIntents(intentGroup.mcpIntents())   // ← MCP 意图传给 LLM
+    .kbIntents(intentGroup.kbIntents())     // ← KB 意图传给 LLM
+```
+
+#### 对照：意图树为空时失去的能力
+
+| 位置 | 用意图识别做什么 | 意图树为空时 |
+|:---|:---|:---|
+| 歧义引导 ① | 多意图低分 → 反客用户选择 | 永远不会走这条短路，无歧义处理 |
+| 闲聊短路 ② | 纯 SYSTEM 意图 → 直接 LLM 答 | 永远不会走这条短路，每次都走检索 |
+| 检索分流 ③ | KB 节点定向 collection / MCP 工具路由 | 未命中 KB → 全局兜底；未命中 MCP → 无工具调用 |
+| 答题增强 ④ | LLM 看到"用户在 KB/工具 类别下问该问题" | LLM 缺失用户意图信息，答题质量下降 |
+
+**结论**：意图树为空不是"只缺定向检索"——四条能力全丢。歧义引导、闲聊短路、MCP 路由、答题上下文这四个功能全部依赖于意图识别，彼此互相卡。
+
 ---
 
 ## 三、意图树和 Query 重写是并行的吗？每次对话都重写吗？
