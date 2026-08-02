@@ -12,6 +12,7 @@
 | `ragent-interview-notes.md` | 1116 | 原版：侧重管线细节、切分案例、设计模式 |
 | `ragent-interview-notes-2.md` | 1381 | 扩展版：侧重表结构、意图树、RRF 归一化、Agentic RAG |
 | `ragent-chunking-analysis.md` | — | **Chunking 专题**：Parser 矩阵、Block 模型、分块流程、与 AgentFlow 对比、六种业界策略评估 |
+| `ragent-intent-rewrite-config.md` | — | **意图树 & Query 重写**：t_intent_node 配置 SQL、KB 意图识别流程、并行/串行关系、改写模型选型、temperature 调参 |
 
 **两文件互补**：`notes.md` 的五(大表切分)、六(父子文档)、九(向量库与Milvus)、十二(Rerank模型详解)、十三(设计模式)、十四(线程池) 在 `notes-2.md` 中没有或更简略；`notes-2.md` 的二(数据库表结构)、十八(意图树与Agent流转)、十九(RRF归一化)、二十(Agentic RAG)、二十一(Query决策树) 是独有的深度章节。
 
@@ -291,3 +292,37 @@
 
 ### Q: 面试时怎么讲 Chunking？
 - 十 (line 854)：4 个高频问题的标准回答模板
+
+---
+
+## 意图树 & Query 重写 专题速查（ragent-intent-rewrite-config.md）
+
+### Q: 意图树有默认实现吗？怎么配？
+- 一.1 (line ~)：DefaultIntentClassifier 是默认实现，但无内置节点
+- 一.2：三级加载链（Redis → DB → 空）
+- 一.4：t_intent_node 表完整 INSERT SQL
+- 一.5：配完后的链路变化（向量通道从全局转意图定向）
+
+### Q: KB 意图怎么识别？
+- 二.2：classifyTargets 6 步流程（叶子收集 → Prompt → LLM 打分 → 排序 → 三类分流 → 作用域选择）
+
+### Q: 意图树和 Query 重写是并行的吗？每次对话都重写吗？
+- 三.1：不并行，串行（rewriteQuery → resolveIntents）
+- 三.2：当前策略完整链路（含 Multi-Query 变体扩展）
+- 三.3：两个开关 query-rewrite.enabled + multi-query.enabled
+- 三.4：按开关组合的 LLM 调用次数表
+- 三.5：变体扩展触发条件（短 query ≤10 字符才触发）
+- 三.6：变体生成 details（T=0.7 买多样性，原始 rewrite 排第一）
+- 三.7：**Multi-Query 改造前后对比**（数据模型/重写/检索/核心差异表）+ 面试话术
+
+### Q: RAGChatServiceImpl 实现的是哪个对话？
+- 四：用户问答 SSE 流式对话；RAGChatServiceImpl 是事务边界（限流+Trace+SSE），流水线大脑在 StreamChatPipeline
+
+### Q: 改写 query 用哪个模型？
+- 五：当前用默认 chat 模型 deepseek-v4-flash；改写/答题共用主链路；优化建议：让改写走 ollama 小模型
+
+### Q: temperature 参数有什么作用？
+- 六.6.2：数学原理 softmax(logit/T)
+- 六.6.4：Ragent 多个调用点温度调优（改写 0.1 / 变体 0.7 / 意图 0.1 / 答题 0.0）
+- 六.6.5：为什么 RAG 答题用 0.0（防幻觉）
+- 六.6.6：temperature=0 也不保证 100% 可复现（需配合 topP=1）
