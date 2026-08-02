@@ -85,7 +85,7 @@ rag:
 
   default:
     collection-name: rag_default_store
-    dimension: 1024
+    dimension: 1536
     metric-type: COSINE
     sse-timeout-ms: 300000  # SSE 全局超时（毫秒），默认 5 分钟
 

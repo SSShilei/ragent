@@ -53,11 +53,17 @@ public class IntentResolver {
         List<String> subQuestions = CollUtil.isNotEmpty(rewriteResult.subQuestions())
                 ? rewriteResult.subQuestions()
                 : List.of(rewriteResult.rewrittenQuestion());
+        // Multi-Query 变体：仅在单子问题时传递给检索层，与子问题数量严格对应
+        boolean singleSubQuestion = subQuestions.size() == 1;
         List<CompletableFuture<SubQuestionIntent>> tasks = subQuestions.stream()
                 .map(q -> CompletableFuture.supplyAsync(
                         () -> {
                             try {
-                                return new SubQuestionIntent(q, classifyIntents(q));
+                                List<NodeScore> scores = classifyIntents(q);
+                                List<String> variants = (singleSubQuestion && rewriteResult.hasVariants())
+                                        ? rewriteResult.variants()
+                                        : List.of();
+                                return new SubQuestionIntent(q, scores, variants);
                             } catch (Exception e) {
                                 log.error("子问题意图分类失败，降级为空意图，question：{}", q, e);
                                 return new SubQuestionIntent(q, List.of());

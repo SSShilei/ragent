@@ -71,12 +71,14 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
         if (!ragConfigProperties.getQueryRewriteEnabled()) {
             String normalized = queryTermMappingService.normalize(userQuestion);
             List<String> subs = ruleBasedSplit(normalized);
-            return new RewriteResult(normalized, subs);
+            RewriteResult base = new RewriteResult(normalized, subs);
+            return maybeExpandVariants(userQuestion, base);
         }
 
         String normalizedQuestion = queryTermMappingService.normalize(userQuestion);
 
-        return callLLMRewriteAndSplit(normalizedQuestion, userQuestion, history);
+        RewriteResult fromLLM = callLLMRewriteAndSplit(normalizedQuestion, userQuestion, history);
+        return maybeExpandVariants(userQuestion, fromLLM);
     }
 
     /**
@@ -87,14 +89,14 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
         if (!ragConfigProperties.getQueryRewriteEnabled()) {
             String normalized = queryTermMappingService.normalize(userQuestion);
             List<String> subs = ruleBasedSplit(normalized);
-            return new RewriteResult(normalized, subs);
+            RewriteResult base = new RewriteResult(normalized, subs);
+            return maybeExpandVariants(userQuestion, base);
         }
 
         String normalizedQuestion = queryTermMappingService.normalize(userQuestion);
 
-        return callLLMRewriteAndSplit(normalizedQuestion, userQuestion, List.of());
-
-        // 兜底：使用归一化结果 + 规则拆分
+        RewriteResult fromLLM = callLLMRewriteAndSplit(normalizedQuestion, userQuestion, List.of());
+        return maybeExpandVariants(userQuestion, fromLLM);
     }
 
     private RewriteResult callLLMRewriteAndSplit(String normalizedQuestion,
@@ -206,5 +208,102 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
         return parts.stream()
                 .map(s -> s.endsWith("？") || s.endsWith("?") ? s : s + "？")
                 .toList();
+    }
+
+    // ==================== Multi-Query 变体扩展 ====================
+
+    /**
+     * 如果条件满足，对改写后的主问题生成语义变体（Multi-Query）
+     * 原始 query 始终保留在 variants 列表的第一位
+     *
+     * @param rawQuery  用户原始输入（用于长度/歧义判断）
+     * @param base      改写+拆分后的基础结果
+     * @return 携带变体的 RewriteResult，不满足条件时原样返回
+     */
+    private RewriteResult maybeExpandVariants(String rawQuery, RewriteResult base) {
+        if (!shouldExpand(rawQuery, base)) {
+            return base;
+        }
+
+        try {
+            List<String> generated = generateVariants(base.rewrittenQuestion());
+            if (CollUtil.isEmpty(generated)) {
+                return base;
+            }
+            List<String> variants = new ArrayList<>();
+            variants.add(base.rewrittenQuestion()); // 原始 rewrite 排第一位，确保始终参与检索
+            for (String g : generated) {
+                if (!g.equals(base.rewrittenQuestion())) {
+                    variants.add(g);
+                }
+            }
+            log.info("Multi-Query 变体生成完成, 原始 query='{}', 改写='{}', 变体={}",
+                    rawQuery, base.rewrittenQuestion(), variants);
+            return new RewriteResult(base.rewrittenQuestion(), base.subQuestions(), variants);
+        } catch (Exception e) {
+            log.warn("Multi-Query 变体生成失败, 回退原始结果: {}", e.getMessage());
+            return base;
+        }
+    }
+
+    /**
+     * 判断是否应该触发 Multi-Query 变体扩展
+     */
+    private boolean shouldExpand(String rawQuery, RewriteResult base) {
+        if (!Boolean.TRUE.equals(ragConfigProperties.getMultiQueryEnabled())) {
+            return false;
+        }
+        if (StrUtil.isBlank(rawQuery) || StrUtil.isBlank(base.rewrittenQuestion())) {
+            return false;
+        }
+        // 短 query 触发：改写后的 query 字符数低于阈值
+        if (base.rewrittenQuestion().trim().length() <= ragConfigProperties.getMultiQueryMinQueryChars()) {
+            return true;
+        }
+        // 原始 query 已含多个问句或显式列举 → 不扩展（拆分已覆盖）
+        if (base.hasSubQuestions()) {
+            return false;
+        }
+        // 改写后的 query 仍较短或模糊 → 扩展
+        return base.rewrittenQuestion().trim().length() <= ragConfigProperties.getMultiQueryMinQueryChars() * 2;
+    }
+
+    /**
+     * 调 LLM 生成同一问题的多个语义变体
+     * <p>
+     * temperature=0.7 增加多样性，low-topP 保持基本质量
+     * 单行输出，便于解析
+     */
+    private List<String> generateVariants(String question) {
+        int maxVariants = ragConfigProperties.getMultiQueryMaxVariants();
+        if (maxVariants <= 0) {
+            return List.of();
+        }
+
+        String prompt = String.format(
+                "为以下问题生成 %d 个不同角度的改写版本，用于文档检索。\n"
+                        + "每行一个问题，不要编号，不要解释。\n\n"
+                        + "原始问题：%s",
+                maxVariants, question
+        );
+
+        ChatRequest req = ChatRequest.builder()
+                .messages(List.of(ChatMessage.user(prompt)))
+                .temperature(0.7D)
+                .topP(0.5D)
+                .thinking(false)
+                .build();
+
+        String raw = llmService.chat(req);
+        if (StrUtil.isBlank(raw)) {
+            return List.of();
+        }
+
+        return Arrays.stream(raw.split("\\n"))
+                .map(String::trim)
+                .filter(StrUtil::isNotBlank)
+                .filter(line -> !line.equals(question))
+                .limit(maxVariants)
+                .collect(Collectors.toList());
     }
 }

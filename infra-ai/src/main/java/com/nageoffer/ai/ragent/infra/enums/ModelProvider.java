@@ -51,7 +51,12 @@ public enum ModelProvider {
     /**
      * 空实现，用于测试或占位
      */
-    NOOP("noop");
+    NOOP("noop"),
+
+    /**
+     * Gitee AI 模型服务（Embedding + Rerank）
+     */
+    GITEE("gitee");
 
     private final String id;
 

@@ -24,8 +24,13 @@ import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 /**
  * 子问题与其意图候选
  *
- * @param subQuestion 子问题文本
- * @param nodeScores  子问题的意图候选
+ * @param subQuestion   子问题文本
+ * @param nodeScores    子问题的意图候选
+ * @param variantQueries 同一子问题的语义变体列表（Multi-Query），空或单元素时不触发变体检索
  */
-public record SubQuestionIntent(String subQuestion, List<NodeScore> nodeScores) {
+public record SubQuestionIntent(String subQuestion, List<NodeScore> nodeScores, List<String> variantQueries) {
+
+    public SubQuestionIntent(String subQuestion, List<NodeScore> nodeScores) {
+        this(subQuestion, nodeScores, List.of());
+    }
 }

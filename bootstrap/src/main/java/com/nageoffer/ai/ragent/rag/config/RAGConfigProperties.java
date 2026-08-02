@@ -34,6 +34,10 @@ import org.springframework.context.annotation.Configuration;
  * rag:
  *   query-rewrite:
  *     enabled: true
+ *   multi-query:
+ *     enabled: false
+ *     max-variants: 3
+ *     min-query-chars: 10
  * </pre>
  */
 @Data
@@ -68,4 +72,31 @@ public class RAGConfigProperties {
      */
     @Value("${rag.context.enrich.enabled:true}")
     private Boolean contextEnrichEnabled;
+
+    /**
+     * Multi-Query 扩展开关
+     * <p>
+     * 控制是否生成同一问题的语义变体进行多路检索,
+     * 适用于短 query、模糊 query 等原始检索召回不足的场景
+     * 默认值：{@code false}
+     */
+    @Value("${rag.multi-query.enabled:false}")
+    private Boolean multiQueryEnabled;
+
+    /**
+     * Multi-Query 最大变体数量
+     * <p>
+     * 每次最多生成几个语义变体（不含原始 query），默认 3
+     */
+    @Value("${rag.multi-query.max-variants:3}")
+    private Integer multiQueryMaxVariants;
+
+    /**
+     * Multi-Query 触发的最小 query 字符数
+     * <p>
+     * query 长度低于此阈值时触发 Multi-Query 扩展，超过则跳过
+     * 默认 10 字符
+     */
+    @Value("${rag.multi-query.min-query-chars:10}")
+    private Integer multiQueryMinQueryChars;
 }

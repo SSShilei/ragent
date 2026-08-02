@@ -19,6 +19,22 @@ package com.nageoffer.ai.ragent.rag.core.rewrite;
 
 import java.util.List;
 
-public record RewriteResult(String rewrittenQuestion, List<String> subQuestions) {
+/**
+ * @param rewrittenQuestion 改写后的检索查询
+ * @param subQuestions      拆分出的子问题列表
+ * @param variants          同一主问题生成的语义变体（Multi-Query 扩展），为空时不触发变体检索
+ */
+public record RewriteResult(String rewrittenQuestion, List<String> subQuestions, List<String> variants) {
 
+    public RewriteResult(String rewrittenQuestion, List<String> subQuestions) {
+        this(rewrittenQuestion, subQuestions, List.of());
+    }
+
+    public boolean hasVariants() {
+        return variants != null && !variants.isEmpty();
+    }
+
+    public boolean hasSubQuestions() {
+        return subQuestions != null && subQuestions.size() > 1;
+    }
 }

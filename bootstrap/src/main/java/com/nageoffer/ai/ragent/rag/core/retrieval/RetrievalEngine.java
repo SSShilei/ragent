@@ -40,6 +40,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -197,6 +198,12 @@ public class RetrievalEngine {
     }
 
     private KbResult retrieveAndRerank(SubQuestionIntent intent, List<NodeScore> kbIntents, int topK) {
+        // Multi-Query 变体：每个变体作为独立 query 并行检索
+        List<String> variantQueries = intent.variantQueries();
+        if (CollUtil.isNotEmpty(variantQueries) && variantQueries.size() > 1) {
+            return retrieveWithVariants(intent, kbIntents, topK, variantQueries);
+        }
+
         // 使用多通道检索引擎（是否启用全局检索由置信度阈值决定）
         List<SubQuestionIntent> subIntents = List.of(intent);
         List<RetrievedChunk> chunks = multiChannelRetrievalEngine.retrieveKnowledgeChannels(subIntents, topK);
@@ -206,23 +213,69 @@ public class RetrievalEngine {
         }
 
         // 按意图节点分组（用于格式化上下文）
-        Map<String, List<RetrievedChunk>> intentChunks = new HashMap<>();
+        Map<String, List<RetrievedChunk>> intentChunks = buildIntentChunks(chunks, kbIntents);
+        String groupedContext = contextFormatter.formatKbContext(kbIntents, intentChunks, topK);
+        return new KbResult(groupedContext, intentChunks);
+    }
 
-        // 如果有意图识别结果，按意图节点 ID 分组
+    /**
+     * Multi-Query 变体检索：每个变体并行跑多通道检索，结果按去重合并
+     * 同一 chunk 在多个变体中命中 → 保留最高优先级通道版本（复用 Dedup 通道优先级）
+     */
+    private KbResult retrieveWithVariants(SubQuestionIntent intent, List<NodeScore> kbIntents, int topK, List<String> variants) {
+        // 每个变体并行检索
+        List<CompletableFuture<List<RetrievedChunk>>> futures = variants.stream()
+                .map(variant -> CompletableFuture.supplyAsync(
+                        () -> {
+                            SubQuestionIntent variantIntent = new SubQuestionIntent(variant, intent.nodeScores());
+                            List<SubQuestionIntent> subIntents = List.of(variantIntent);
+                            return multiChannelRetrievalEngine.retrieveKnowledgeChannels(subIntents, topK);
+                        },
+                        ragContextExecutor
+                ))
+                .toList();
+
+        List<List<RetrievedChunk>> variantResults = futures.stream()
+                .map(CompletableFuture::join)
+                .filter(CollUtil::isNotEmpty)
+                .toList();
+
+        if (variantResults.isEmpty()) {
+            return KbResult.empty();
+        }
+
+        // 合并去重：同一 chunk 多变体命中 → 保留最高优先级通道的版本
+        // LinkedHashMap 保持首次出现顺序（变体 0=原始 query 的优先级最高）
+        Map<String, RetrievedChunk> merged = new java.util.LinkedHashMap<>();
+        for (List<RetrievedChunk> chunks : variantResults) {
+            for (RetrievedChunk chunk : chunks) {
+                String key = chunkKey(chunk);
+                if (!merged.containsKey(key)) {
+                    merged.put(key, chunk);
+                }
+            }
+        }
+
+        List<RetrievedChunk> dedupChunks = new ArrayList<>(merged.values());
+        Map<String, List<RetrievedChunk>> intentChunks = buildIntentChunks(dedupChunks, kbIntents);
+        String groupedContext = contextFormatter.formatKbContext(kbIntents, intentChunks, topK);
+        return new KbResult(groupedContext, intentChunks);
+    }
+
+    private Map<String, List<RetrievedChunk>> buildIntentChunks(List<RetrievedChunk> chunks, List<NodeScore> kbIntents) {
+        Map<String, List<RetrievedChunk>> intentChunks = new HashMap<>();
         if (CollUtil.isNotEmpty(kbIntents)) {
-            // 将所有 chunks 按意图节点 ID 分配
-            // 注意：多通道检索返回的 chunks 无法精确对应到某个意图节点
-            // 所以我们将所有 chunks 分配给每个意图节点
             for (NodeScore ns : kbIntents) {
                 intentChunks.put(ns.getNode().getId(), chunks);
             }
         } else {
-            // 如果没有意图识别结果，使用特殊 key
             intentChunks.put(MULTI_CHANNEL_KEY, chunks);
         }
+        return intentChunks;
+    }
 
-        String groupedContext = contextFormatter.formatKbContext(kbIntents, intentChunks, topK);
-        return new KbResult(groupedContext, intentChunks);
+    private String chunkKey(RetrievedChunk chunk) {
+        return chunk.getId() != null ? chunk.getId() : StrUtil.isBlank(chunk.getText()) ? "" : chunk.getText().hashCode() + "";
     }
 
     /**
