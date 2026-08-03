@@ -16,6 +16,9 @@
 
 **两文件互补**：`notes.md` 的五(大表切分)、六(父子文档)、九(向量库与Milvus)、十二(Rerank模型详解)、十三(设计模式)、十四(线程池) 在 `notes-2.md` 中没有或更简略；`notes-2.md` 的二(数据库表结构)、十八(意图树与Agent流转)、十九(RRF归一化)、二十(Agentic RAG)、二十一(Query决策树) 是独有的深度章节。
 
+| `ragent-core-mechanisms-2.md` | — | **核心机制第二篇**：Context 组装（chunk→Prompt）、Rerank 详解（cross vs bi-encoder、模型路由）、限流并发（Redis 公平队列 + MinerU 限流）、SSE 流式（多模型 fallback + 首包超时探测） |
+| `ragent-core-mechanisms-3.md` | — | **核心机制第三篇**：全链路 Trace、分布式调度、MCP 工具调用、评测体系、降级策略、Pipeline 数据通道、飞书文档接入、权限 & 多租户 |
+
 ---
 
 ## 快速导航（按主题分类）
@@ -330,3 +333,32 @@
 - 六.6.4：Ragent 多个调用点温度调优（改写 0.1 / 变体 0.7 / 意图 0.1 / 答题 0.0）
 - 六.6.5：为什么 RAG 答题用 0.0（防幻觉）
 - 六.6.6：temperature=0 也不保证 100% 可复现（需配合 topP=1）
+
+---
+
+## 核心机制第二篇 专题速查（ragent-core-mechanisms-2.md）
+
+### Q: 检索回来的 chunk 怎么拼成 Prompt？"等价父文档"具体怎么实现？
+- 一.1：DefaultContextFormatter 三层分支（无意图/单意图/多意图）
+- 一.2：单意图 → renderSnippetRules + renderChunksGroupedByDoc + renderKbSection
+- 一.3：**按 docId 分组 + 组内按 chunkIndex 排序还原原文顺序**（等价父文档的核心实现）
+- 一.4：多意图合并去重（chunkId 去重 LinkedHashMap 保序）
+
+### Q: Rerank 模型怎么用的？cross-encoder 比 bi-encoder 好在哪？
+- 二.1：Bi-encoder vs Cross-encoder 对比表（原理/速度/精度/阶段）
+- 二.2：为什么 Rerank 放 RRF 之后（减候选量 31→17，省近一半成本）
+- 二.3：模型路由（qwen3-rerank via gitee）
+- 二.4：归因日志解读（向量 vs 关键词 Rerank 前后存活率）
+
+### Q: 限流和并发控制怎么做的？
+- 三.1：ChatQueueLimiter → SSE 入口限流（开关/排队/reject/bind 取消）
+- 三.2：**FairDistributedRateLimiter — Redis 分布式公平队列**（Semaphore + SortedSet + Lua + RTopic）
+- 三.3：Ticket 状态机（PENDING → GRANTED/TIMED_OUT/CANCELLED） + entry 存活标记
+- 三.3：MinerU 解析限流（独立 5 槽）
+
+### Q: SSE 流式输出怎么做的？模型挂了怎么处理？
+- 四.1：SSE 完整链路（pipeline → RoutingLLMService → 多模型 fallback → SseEmitter）
+- 四.2：**多模型 Fallback**（逐个尝试 + 健康标记 + 60s 首包超时）
+- 四.3：健康状态存储（failure-threshold=2 + open-duration-ms=30000 半开）
+- 四.4：首包超时探测（LlmFirstPacketProbe + TTFT Trace）
+- 四.5：前端取消 → cancelBinder 反向释放 permit
