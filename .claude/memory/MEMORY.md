@@ -1,2 +1,2 @@
 - [PowerAgent 文档索引](poweragent-doc-index.md) — PA 项目 16 个文档（doc-poweragent/）的完整索引，覆盖架构/源码/面试 Q&A
-- [Ragent 面试笔记索引](ragent-doc-index.md) — Ragent 项目 docs-interview/ 下笔记的完整索引，覆盖管线/切分/Agentic RAG/决策树/Metadata/意图树/Query重写/temperature/Context组装/Rerank/限流/SSE
+- [Ragent 面试笔记索引](ragent-doc-index.md) — Ragent 项目 docs-interview/ 下笔记的完整索引，覆盖 8 个文档：管线/切分/Agentic RAG/决策树/Metadata/意图树/Query重写/temperature/Context/Rerank/限流/SSE/Trace/调度/MCP/评测/降级/权限/召回排查/Agent状态机/安全/生产工程

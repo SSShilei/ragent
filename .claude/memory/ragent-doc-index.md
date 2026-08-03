@@ -18,6 +18,8 @@
 
 | `ragent-core-mechanisms-2.md` | — | **核心机制第二篇**：Context 组装（chunk→Prompt）、Rerank 详解（cross vs bi-encoder、模型路由）、限流并发（Redis 公平队列 + MinerU 限流）、SSE 流式（多模型 fallback + 首包超时探测） |
 | `ragent-core-mechanisms-3.md` | — | **核心机制第三篇**：全链路 Trace、分布式调度、MCP 工具调用、评测体系、降级策略、Pipeline 数据通道、飞书文档接入、权限 & 多租户 |
+| `ragent-deep-dive-1.md` | — | **深水区（上）**：检索召回排查（6 层框架）、Agent 状态机（暂停/恢复/死循环防）、MCP 通信与安全 |
+| `ragent-deep-dive-2.md` | — | **深水区（下）**：RAG 安全（间接注入/Text2SQL/脱敏）、Agent 评测（9 维指标）、生产工程（SSE 重连/取消推理/Prompt Cache/Token 预算） |
 
 ---
 
@@ -362,3 +364,97 @@
 - 四.3：健康状态存储（failure-threshold=2 + open-duration-ms=30000 半开）
 - 四.4：首包超时探测（LlmFirstPacketProbe + TTFT Trace）
 - 四.5：前端取消 → cancelBinder 反向释放 permit
+
+---
+
+## 核心机制第三篇 专题速查（ragent-core-mechanisms-3.md）
+
+### Q: 全链路追踪怎么做的？
+- 一.1：TTL 透传（TransmittableThreadLocal + 深拷贝 NODE_STACK）
+- 一.2：AOP 采集（@RagTraceNode → startNode/finishNode/pushNode/popNode）
+- 一.3：t_rag_trace_run + t_rag_trace_node 表结构 + 调用树还原
+
+### Q: 文档自动同步（分布式调度）怎么做的？
+- 二.1：四阶段流程（扫描 → 变更检测 → 原子切换 → 锁续期）
+- 二.2：**三级变更检测**（ETag → Last-Modified → SHA-256）+ 为什么三级
+- 二.3：DB 乐观锁 + 心跳续期 + 安全防护
+
+### Q: MCP 工具调用机制？
+- 三.1：架构（意图 MCP 节点 → registry → extractor → executor）
+- 三.3：LLM 驱动的参数提取 + 意图节点自定义 Prompt
+- 三.4：mcpBatchExecutor 并行执行
+
+### Q: 评测体系怎么设计的？
+- 四.1：EvalController 纯检索评测（不调 LLM 消除随机性）
+- 四.2：intentLeafIds 评估意图 Top-1 准确率
+
+### Q: 降级策略有哪些？
+- 五.1：LLM 多模型 fallback（60s 首包超时 + 健康标记）
+- 五.2：Query 重写失败 → 术语归一化兜底
+- 五.3：Embedding fallback chain
+- 五.5：关键词索引 best-effort 不阻塞主链路
+
+### Q: Pipeline 和直接分块的区别？
+- 六：IngestionEngine DAG 编排 vs 三步固定链路
+
+### Q: 飞书文档怎么接？
+- 七：FeishuFetcher + Token 认证 + Docx 在线文档 vs 二进制附件
+
+### Q: 权限 & 多租户怎么隔离？
+- 八：Sa-token + kb_id 维度隔离（非 SaaS 多租户）
+
+---
+
+## 深水区专题速查
+
+### ragent-deep-dive-1.md（上）
+
+#### Q: 检索召回率低怎么排查？
+- 一.1：分层排查框架（Query→意图→通道→后处理→Chunk→Embedding 六层）
+- 一.2：诊断 SQL（向量维度检查、混库检测、ES 数据验证）
+
+#### Q: Agent 任务状态机怎么设计？服务重启后任务怎么恢复？
+- 二.1：CREATED → FINAL_ANSWER 六状态转换表
+- 二.2：DB 乐观锁恢复 + 中间结果持久化 + 幂等标记
+
+#### Q: 怎么避免工具重复执行？
+- 二.3：三层防护（幂等 token + 结果缓存 + DB UNIQUE 约束）
+
+#### Q: 用户暂停/取消任务怎么实现？
+- 二.4：StreamTaskManager Redis 跨实例广播取消链路
+
+#### Q: 死循环怎么管控？
+- 二.5：三层防御表（max_llm_calls 硬上限 / Future.get(timeout) 超时 / 预检 DFS）+ Ragent Pipeline 特有防护
+
+#### Q: MCP 完整通信模型？和 Function Calling 的区别？
+- 三.1：MCP 五步通信流程
+- 三.2：MCP / Function Calling / OpenAPI 对比表
+
+#### Q: MCP 安全风险与防护？
+- 三.3：风险矩阵（Server 注入/数据外泄/冒充/权限过宽/DDOS）
+- 三.4：Ragent 当前安全层 + 缺失的防护
+
+### ragent-deep-dive-2.md（下）
+
+#### Q: RAG 安全不是 Prompt 里写一句"不要泄露数据"？
+- 四.1：间接 Prompt Injection + 四层防护（结构隔离 → 内容扫描 → 降级兜底 → 审计）
+- 四.2：Text2SQL AST 校验 + 只读限制 + 成本控制
+- 四.3：敏感数据分层识别（规则 → NER → LLM 三层递进）
+- 四.4：安全处置预案
+
+#### Q: Agent 怎么评测？
+- 五.1：9 维指标体系（成功率/工具准确率/不必要调用率/引用正确率/事实一致性/接管率/延迟/完成时间/成本）
+- 五.2：Ragent EvalController 能自动算的指标
+- 五.4：成本分析模型
+
+#### Q: SSE 断线重连怎么处理？
+- 六.1：Ragent 当前实现 vs 完整的重连方案（taskId + lastEventId 进度恢复）
+
+#### Q: 用户停止生成后怎么真正取消推理？
+- 六.2：Ragent 完整取消链路（前端 → cancelBinder → Ticket.cancel → StreamTaskManager → Redis 广播 → StreamCancellationHandle）
+
+#### Q: Prompt Cache、语义缓存、错误命中怎么取舍？
+- 六.4：Prompt Cache 适合 system prompt 不变部分 / RAG 不该做语义缓存 / 错误命中防法（TTL + knowledge_version key）
+
+#### Q: Token 预算和租户成本控制怎么搞？
+- 六.5：TokenBudget 模型 + 成本归因到每个 LLM 调用点
