@@ -358,8 +358,7 @@
 
 ### Q: 限流和并发控制怎么做的？
 - 三.1：ChatQueueLimiter → SSE 入口限流（开关/排队/reject/bind 取消）
-- 三.2：**FairDistributedRateLimiter — Redis 分布式公平队列**（Semaphore + SortedSet + Lua + RTopic）
-- 三.3：Ticket 状态机（PENDING → GRANTED/TIMED_OUT/CANCELLED） + entry 存活标记
+- 三.2：**FairDistributedRateLimiter 详解**（解决什么问题 + 完整时间线 + 分步详解入队/轮询/原子抢占/取消链路/状态机 + 5 个安全机制对照表）
 - 三.3：MinerU 解析限流（独立 5 槽）
 
 ### Q: SSE 流式输出怎么做的？模型挂了怎么处理？

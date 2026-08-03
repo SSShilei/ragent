@@ -218,26 +218,133 @@ enqueue 内部:
 
 ### 3.2 FairDistributedRateLimiter——Redis 分布式公平队列
 
-核心设计：**"谁先排队，谁先拿到 permit"**（非抢占式、FIFO）。
+#### 解决什么问题
+
+多用户同时提问，LLM 槽位有限（`max-concurrent=10`）。没有排队机制时第 11 个请求直接被拒——不公平，先提问的人应该先拿槽位。更糟的是**多实例部署**：两台 Ragent 各占 5 个槽位，但 10 个请求全落在实例 A，实例 B 闲着。简单本地计数解决不了。
+
+#### 为什么不能只用 Redisson 的 tryAcquire
+
+`RPermitExpirableSemaphore.tryAcquire()` 能拿 permit，但它是**非公平的**——多个人同时抢，谁抢到算谁的，不保证先来的先拿。刚来的请求可能先抢到，先排队的人反而一直等待。
+
+#### 核心设计："谁先排队，谁先拿到 permit"（非抢占式、FIFO）
 
 ```
 Redisson RPermitExpirableSemaphore (permit 池, max=10)
-Redis ScoredSortedSet (排队队列, score=序列号)
-Redis Lua 脚本 (原子 claim: ZREM+检查 entry 存活标记)
+Redis ScoredSortedSet (排队队列, score=序列号 → FIFO)
+Redis Lua 脚本 (原子 claim: ZREM + 检查 entry 存活标记)
 Redis RTopic (跨实例通知: permit 释放时唤醒等待者)
-
-每个 Ticket 有状态机:
-  PENDING → GRANTED (拿到 permit, 执行业务)
-  PENDING → TIMED_OUT (超时, 前端 reject)
-  PENDING → CANCELLED (emitter 关闭, 用户在浏览器点了停止)
-  终态互斥, 回调最多触发一次, permit 自动释放
 ```
 
-**关键安全机制**：
+#### 完整时间线示例
 
-- **entry 存活标记**（`entryKeyPrefix + requestId`）：JVM 崩溃后自然过期，后续 claim 的 Lua 脚本会跳过已死 entry，避免永久占据队头
-- **permit 自动过期**：`lease-seconds=30`，业务超时 permit 自动回收，不会因线程卡死导致 permit 泄漏
-- **跨实例通知**：一台机器释放 permit → 广播 `permit_changed` → 其他机器立即唤醒等待者尝试抢占
+```
+用户 A 提问（第 11 个，槽位已满，需要排队）
+用户 B 提问（第 12 个）
+
+T0: A 到达 → tryAcquireIfReady → availablePermits=0
+    → setEntryMarker(A, ttl=20s)   ← Redis 写存活标记
+    → queue.add(seq=100, "A")      ← 入队
+    → scheduleQueuePoll(A)         ← 启动 200ms 定时轮询
+
+T1: B 到达 → tryAcquireIfReady → availablePermits=0
+    → setEntryMarker(B, ttl=20s)
+    → queue.add(seq=101, "B")
+    → scheduleQueuePoll(B)
+
+T2: 某个执行中的任务完成 → releasePermit
+    → 1 个 permit 回到池
+    → publishQueueNotify()  ← Redis 广播 "permit_changed"
+
+T3: PollNotifier 收到广播 → 批量唤醒所有等待的 poller
+    A 的 poller: claimIfReady("A", availablePermits=1)
+      → Lua 原子执行: "A" 是队头 ✅ → ZREM "A" → claim 成功
+      → tryAcquirePermit → permitId = "xxx"
+      → A.state: PENDING → GRANTED  ✅ A 拿到，开始执行业务
+
+    B 的 poller: claimIfReady("B", availablePermits=1)
+      → Lua 原子执行: availablePermits=0 (已被 A 消耗)
+      → claim 失败，B 继续等待
+```
+
+#### 分步详解
+
+**① 入队**（`acquire`，行 138）：
+
+```java
+// 写入 entry 存活标记（TTL = maxWaitMillis + 5s 缓冲）
+setEntryMarker(ticket.requestId, req.maxWaitMillis());
+
+// 加入 Redis SortedSet（score = 递增序列号，保证 FIFO）
+RScoredSortedSet<String> queue = redissonClient.getScoredSortedSet(queueKey);
+queue.add(nextQueueSeq(), ticket.requestId);
+
+// 尝试立即获取
+if (tryAcquireIfReady(ticket)) return;
+
+// 没拿到 → 启动定时轮询
+scheduleQueuePoll(ticket);
+```
+
+**② 轮询等待**（`scheduleQueuePoll`，行 338）：200ms 定时轮询 + PollNotifier 即时通知：
+
+```
+定时轮询 (200ms):     确保至少每 200ms 检查一次 → 最坏 200ms 延迟
+PollNotifier 通知:    收到 Redis 广播立即批量唤醒 → ~5ms 延迟
+```
+
+**③ 原子抢占**（Lua 脚本 `lua/queue_claim_atomic.lua`）：
+
+```lua
+-- ① 查队头（ZSet 中 score 最小 = 最早入队）
+local queueHead = redis.call('ZRANGE', queueKey, 0, 0)
+
+-- ② 检查队头是否有活着的 entry 标记 → 无标记 = JVM 崩溃 → ZREM 清理
+while queueHead and not redis.call('EXISTS', entryPrefix .. queueHead) do
+    redis.call('ZREM', queueKey, queueHead)
+    queueHead = redis.call('ZRANGE', queueKey, 0, 0)
+end
+
+-- ③ 只有队头 + permit 可用 → 原子 ZREM（抢占成功）
+if queueHead == requestId and availablePermits > 0 then
+    redis.call('ZREM', queueKey, requestId)
+    return {1, score}  -- 抢占成功！
+end
+return {0}  -- 失败（不在队头或没 permit）
+```
+
+三个保障：只允许队头抢占 → **FIFO 公平** / Lua 原子执行 → **多实例不冲突** / 清理僵尸队头 → **JVM 崩溃不阻塞**
+
+**④ 取消链路**：用户点"停止生成" → emitter.close → cancelBinder → Ticket.cancel：
+
+```
+state.compareAndSet(PENDING, CANCELLED)  ← CAS，只执行一次
+cleanup():
+  ZREM from queue            ← 从等待队列删除
+  deleteEntryMarker          ← 清理 entry 标记
+  releaseHeldPermit          ← 如果在 GRANTED 态，释放 permit 给下一个人
+  unregisterFromNotifier     ← 注销 poller
+  cancelFuture               ← 停止定时轮询
+  publishQueueNotify         ← 通知其他等待者"permit 变化了"
+```
+
+**⑤ 状态机**：三个终态互斥，回调最多触发一次：
+
+```java
+cancel():  state.compareAndSet(PENDING, CANCELLED)
+timeout(): state.compareAndSet(PENDING, TIMED_OUT)
+grant():   state.compareAndSet(PENDING, GRANTED)
+// 只有第一个成功的 CAS 进入终态，其他 CAS 直接失败返回
+```
+
+#### 关键安全机制
+
+| 机制 | 解决什么问题 | 如果不用会怎样 |
+|:---|:---|:---|
+| **entry 存活标记** (TTL) | JVM 崩溃后 entry 自然过期 | 已死请求永久占据队头，阻塞所有人 |
+| **Lua 原子 claim** | 多实例同时抢占队头 | 两个实例同时 ZREM 同一个 requestId，都 claim 成功但只有一个 permit → 并发槽位错乱 |
+| **permit lease 30s** | 业务线程卡死 | permit 永久泄漏，槽位数慢慢降到 0 |
+| **RTopic 跨实例通知** | 一台机器释放 permit，其他机器不知道 | 其他机器要等 200ms 轮询才能感知 → 平均 100ms 额外延迟 |
+| **状态机 CAS** | cancel/timeout/grant 三个路径并发 | permmit 被释放两次，导致两个请求同时拿到同一个槽位 |
 
 ### 3.3 MinerU 解析限流
 
