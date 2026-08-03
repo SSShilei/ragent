@@ -64,7 +64,7 @@ rag:
     type: pg  # 可选 milvus / pg
 
   keyword:
-    type: none  # 可选 none / es
+    type: es  # 可选 none / es
     es:
       uris: http://127.0.0.1:9200
       index: rag_keyword_store  # 全库共享索引，按 collection_name 字段区分知识库
@@ -147,7 +147,7 @@ rag:
           single-intent-supplement-threshold: 0.8  # 仅单个 KB 意图且分数低于此值 → 走全局作用域兜底
           candidate-budget: 60                   # 全局作用域取数上限（单一旋钮）
       keyword:
-        enabled: false
+        enabled: true
         mode: both
         top-k-multiplier: 2
       graph:

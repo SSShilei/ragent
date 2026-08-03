@@ -61,7 +61,11 @@ public class EsKeywordIndexService implements KeywordIndexService {
      */
     @PostConstruct
     public void initSharedIndex() {
-        ensureSharedIndex();
+        try {
+            ensureSharedIndex();
+        } catch (Exception e) {
+            log.warn("ES 启动前置建索引失败（ES 可能尚未就绪），首次写入时自动重试。error={}", e.getMessage());
+        }
     }
 
     @Override
@@ -98,6 +102,7 @@ public class EsKeywordIndexService implements KeywordIndexService {
 
     @Override
     public void deleteDocumentIndex(String collectionName, String docId) {
+        ensureSharedIndex();
         try {
             esClient.deleteByQuery(d -> d
                     .index(sharedIndex())

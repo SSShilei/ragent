@@ -235,6 +235,7 @@
 4. 优先阅读 `notes-2.md` 的十八-二十一（意图树/Agentic RAG/RRF归一化/Query决策树），这些是面试加分深水区
 5. **Chunking 专题**见 `ragent-chunking-analysis.md`，覆盖 Parser/Block/分块/Metadata 全链路，下方有独立速查表
 6. `notes.md` 的五(大表切分)、六(父子文档) 是两个完整的场景拆解案例，适合被问"举个例子"时展开
+7. 项目日志文件：`logs/ragent.log`（`bootstrap/src/main/resources/logback-spring.xml` 配置，按天滚动保留 7 天，rag 包 DEBUG 级别）
 
 ---
 
