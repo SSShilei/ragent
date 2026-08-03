@@ -306,12 +306,15 @@
 ### Q: 意图树有默认实现吗？怎么配？
 - 一.1 (line ~)：DefaultIntentClassifier 是默认实现，但无内置节点
 - 一.2：三级加载链（Redis → DB → 空）
+- 一.3：t_intent_node 表关键字段 + **promptSnippet vs promptTemplate 区别**（源码 + 生效时机）
 - 一.4：t_intent_node 表完整 INSERT SQL
 - 一.5：配完后的链路变化（向量通道从全局转意图定向）
 
 ### Q: KB 意图怎么识别？
 - 二.1：classifyTargets 6 步流程（叶子收集 → Prompt → LLM 打分 → 排序 → 三类分流 → 作用域选择）
-- 二.2：**意图识别不只用在检索中**（四个消费点：歧义引导/闲聊短路/检索分流/答题 Prompt 拼装）+ 意图树为空时四条能力全丢对照表
+- 二.2：**意图识别不只用在检索中**（四个消费点：歧义引导/闲聊短路/检索分流/答题 Prompt 拼装）
+- 二.3：**四个消费点汇总图**
+- 二.4：**业内方案对比**（无意图/规则路由/语义路由/LLM分类/多Agent委托 5 个方案 + 选型决策框架）
 
 ### Q: 意图树和 Query 重写是并行的吗？每次对话都重写吗？
 - 三.1：不并行，串行（rewriteQuery → resolveIntents）
@@ -329,6 +332,7 @@
 
 ### Q: 改写 query 用哪个模型？
 - 五：当前用默认 chat 模型 deepseek-v4-flash；改写/答题共用主链路；优化建议：让改写走 ollama 小模型
+- 五.5：**多轮对话与指代消解**（改写带最近 2 轮历史 + Prompt 指代规则 + `user-question-rewrite.st` 模板 + 业内 4 种方案对比）
 
 ### Q: temperature 参数有什么作用？
 - 六.6.2：数学原理 softmax(logit/T)
@@ -342,8 +346,8 @@
 
 ### Q: 检索回来的 chunk 怎么拼成 Prompt？"等价父文档"具体怎么实现？
 - 一.1：DefaultContextFormatter 三层分支（无意图/单意图/多意图）
-- 一.2：单意图 → renderSnippetRules + renderChunksGroupedByDoc + renderKbSection
-- 一.3：**按 docId 分组 + 组内按 chunkIndex 排序还原原文顺序**（等价父文档的核心实现）
+- 一.2：单意图 → renderSnippetRules + renderChunksGroupedByDoc + renderKbSection **+ CONTEXT_FORMAT_PATH 模板结构（kb-section/snippet-rules/kb-doc-block）**
+- 一.3：**按 docId 分组 + 组内按 chunkIndex 排序还原原文顺序**（等价父文档的核心实现）+ **MetadataEnrichment 只补齐 3 个元数据字段（docId/chunkIndex/docName），不取内容**
 - 一.4：多意图合并去重（chunkId 去重 LinkedHashMap 保序）
 
 ### Q: Rerank 模型怎么用的？cross-encoder 比 bi-encoder 好在哪？

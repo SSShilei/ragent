@@ -29,18 +29,35 @@ formatSingleIntentContext(ragent-retrieval, chunks):
 
 最终拼出的 Prompt 结构：
 
-```
-[意图规则: 回答要简洁准确]
+```xml
+<rules>                                   ← 意图节点的 PromptSnippet 配置
+回答要简洁准确
+</rules>
 
-<doc source="简历亮点提炼（合并版）">
-  文档分块策略是...
+<content source="简历亮点提炼（合并版）">   ← docName 剥后缀后作为 source 属性
+  文档分块策略是...                        ← 同文档的 chunk 按 chunkIndex 排序后拼接
   Block 模型包括...
-</doc>
-
-<doc source="Ragent 架构文档">
-  多路召回通过 RRF 融合...
-</doc>
+</content>
 ```
+
+**背后的模板**（`prompt/context-format.st`）：
+
+```
+kb-section          → {snippet_section}{doc_blocks}      ← 包裹整体 KB 上下文
+  ├─ snippet-rules  → <rules>{rules}</rules>              ← 意图节点配置的 PromptSnippet
+  ├─ kb-doc-block   → <content source="{source}">        ← 有文档标题的 chunk 组
+  │                    {chunks}</content>
+  └─ kb-doc-block-untitled → <content>{chunks}</content> ← 无标题的 chunk 组（兜底）
+```
+
+`DefaultContextFormatter` 的方法与 section 的对应：
+
+| Java 方法 | 渲染 section | 产出 |
+|:---|:---|:---|
+| `renderKbSection` | `kb-section` | 整体容器 |
+| `renderSnippetRules` | `snippet-rules` | 意图规则 block |
+| `renderDocBlock` | `kb-doc-block` 或 `kb-doc-block-untitled` | 每个文档的 chunk 组 |
+| `renderChunksGroupedByDoc` | (调用 renderDocBlock × N) | 按 docId 分组后的所有文档块 |
 
 ### 1.3 按文档分组 + 排序（"等价父文档"的实现）
 
@@ -65,6 +82,36 @@ return ordered.stream().map(RetrievedChunk::getText).collect(Collectors.joining(
 
 **效果**：检索命中 chunk_3 和 chunk_7 → MetadataEnrichment 回表拿到同文档的 docId → 分组后按 chunkIndex 排序 → 还原原文顺序 → LLM 看到文档连续片段。
 
+#### MetadataEnrichment 补了什么——检索结果 vs 富化后
+
+检索阶段（PG/ES 查询后）直出的 `RetrievedChunk` 只有 3 个字段：
+
+```java
+// PgVectorRetrieverService: SELECT id, content, score
+RetrievedChunk { id, text, score, docId=null, chunkIndex=null, docName=null }
+```
+
+`MetadataEnrichmentPostProcessor`（`MetadataEnrichmentPostProcessor.java:42`）两跳 SQL 补齐 3 个字段：
+
+```java
+// ① t_knowledge_chunk → doc_id, chunk_index
+// ② t_knowledge_document → doc_name
+chunk.setDocId(meta.docId());
+chunk.setChunkIndex(meta.chunkIndex());
+chunk.setDocName(meta.docName());
+```
+
+| 字段 | 检索阶段 | MetadataEnrichment 后 | 用途 |
+|:---|:---|:---|:---|
+| `id` | ✅ 向量库主键 | 同 | chunk 去重 key |
+| `text` | ✅ chunk 内容 | 同 | **直接拼接，不需再取** |
+| `score` | ✅ 相关度 | 同 | RRF 融合 + Rerank 排分 |
+| `docId` | ❌ | ✅ 回表补齐 | **按文档分组** — 等价父文档的核心 ① |
+| `chunkIndex` | ❌ | ✅ 回表补齐 | **组内排序** — 等价父文档的核心 ② |
+| `docName` | ❌ | ✅ 回表补齐 | LLM 引用标注（`source="..."`）|
+
+**回表取的是元数据，不是内容**：传统 Parent-Child 需要多取父 chunk 的 `text`（内容），一次 I/O。Ragent 的相邻 chunk 的 `text` 本就在检索结果里，只差 `docId`/`chunkIndex`/`docName` 三个标签来分组排序——查的是元数据，成本低一个量级。
+
 ### 1.4 多意图——合并去重
 
 多个 KB 意图命中时（如"检索" + "Chunk 切分"），去重后仍有重叠的 chunk 按 chunkId 去重：
@@ -83,7 +130,7 @@ rerankedByIntent.values().stream()
 
 ### 1.6 面试话术
 
-> 检索回来的 chunk 不是直接堆进 Prompt。我们有三层格式化：第一层按 docId 分组（同文档的 chunk 聚在一起），第二层组内按 chunkIndex 排序还原原文顺序（这是我们"等价父文档"方案的核心——不存两套 chunk，靠排序还原上下文），第三层用模板包裹带文档标题和意图规则。单意图走一条规则，多意图合并去重后拼接。这套机制让 LLM 看到的是按文档组织的连续片段，而不是乱序的碎片列表。
+> 检索回来的 chunk 不是直接堆进 Prompt。我们有 `ContextFormatter` 做三层格式化：第一层按 docId 分组（同文档的 chunk 聚在一起），第二层组内按 chunkIndex 排序还原原文顺序（这是"等价父文档"方案的核心——不存两套 chunk，靠排序还原上下文），第三层用 StringTemplate 模板包裹带文档标题和意图规则。关键设计是 MetadataEnrichment——回表只补齐 docId/chunkIndex/docName 三个元数据标签，不取任何内容。chunk 的 text 在检索阶段已经有了，相邻 chunk 拼起来就是原文。传统 Parent-Child 需要多查一份父 chunk 的内容，我们多查的只是几个元数据字段，成本差了一个数量级。
 
 ---
 

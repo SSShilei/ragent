@@ -39,8 +39,42 @@
 | `examples` | 给 LLM 的示例问题（提高识别率） | `分块/chunk/切分策略` |
 | `collection_name` | KB 类型时定向检索的 collection | 你的 collection 名 |
 | `top_k` | 该节点检索 top-k（覆盖默认值，可空） | 10 |
+| `promptSnippet` | **短规则片段**：拼进检索结果上方 `<rules>` 块，告诉 LLM"这类问题怎么回答" | `回答要包含代码示例` |
+| `promptTemplate` | **完整 Prompt 模板**：仅 SYSTEM 节点，替换默认 system prompt | 自定义角色设定 |
 | `enabled` | 1 启用，0 禁用（实现里过滤掉了 0） | 1 |
 | `deleted` | 0 正常 1 删（实现里过滤掉了 1） | 0 |
+
+#### promptSnippet vs promptTemplate
+
+两个字段都在意图节点配置中，但**作用不同、生效时机不同**：
+
+| | promptSnippet | promptTemplate |
+|:---|:---|:---|
+| 适用节点 | KB + MCP 节点 | SYSTEM 节点（kind=2） |
+| 用在哪个阶段 | ContextFormatter 组装检索上下文时 | handleSystemOnly 闲聊短路时 |
+| 拼到 Prompt 的什么位置 | 检索结果上方的 `<rules>` 块 | 整个 System Prompt |
+| 不填时 | 不拼接规则，纯粹检索 | 用默认 CHAT_SYSTEM_PROMPT |
+
+**promptSnippet 源码**（`DefaultContextFormatter.formatSingleIntentContext` 行 68）：
+
+```java
+String snippet = nodeScore.getNode().getPromptSnippet();  // 取配置
+return renderKbSection(renderSnippetRules(snippet), docBlocks);
+// ↓ 渲染为 <rules>{snippet}</rules><content source="...">{chunks}</content>
+```
+
+**promptTemplate 源码**（`StreamChatPipeline.handleSystemOnly` 行 140）：
+
+```java
+String customPrompt = subIntents.stream()
+    .map(ns -> ns.getNode().getPromptTemplate())  // 取配置
+    .filter(StrUtil::isNotBlank)
+    .findFirst()
+    .orElse(null);
+// 如果配了用它替代默认 prompt，没配用默认
+String systemPrompt = StrUtil.isNotBlank(customPrompt)
+    ? customPrompt : promptTemplateLoader.load(CHAT_SYSTEM_PROMPT_PATH);
+```
 
 ### 1.4 配置 SQL 示例
 
@@ -218,6 +252,121 @@ PromptContext.builder()
 | 答题增强 ④ | LLM 看到"用户在 KB/工具 类别下问该问题" | LLM 缺失用户意图信息，答题质量下降 |
 
 **结论**：意图树为空不是"只缺定向检索"——四条能力全丢。歧义引导、闲聊短路、MCP 路由、答题上下文这四个功能全部依赖于意图识别，彼此互相卡。
+
+### 2.3 意图识别的四个消费点——汇总
+
+```
+resolveIntents() 产出 List<SubQuestionIntent>
+   │
+   ├─ ① 歧义引导（短路）
+   │    handleGuidance()
+   │    多意图低分 → 反问用户"你是想问 A 还是 B？" → 直接 return
+   │
+   ├─ ② 闲聊短路
+   │    handleSystemOnly()
+   │    纯 SYSTEM 意图 → "这个问题不需要检索，直接 LLM 答"
+   │
+   ├─ ③ 检索引擎分流
+   │    NodeScoreFilters.kb(intent)   → KB 节点 → 定向或全局 retrieval
+   │    NodeScoreFilters.mcp(intent)  → MCP 工具调用（不检索，调用外部工具）
+   │    SYSTEM 节点 → 不检索也不调工具
+   │    VectorSearchChannel 根据 KB intent 置信度选作用域：
+   │      ≥0.6 → 意图定向（收窄命中库）
+   │      <0.6 → 全局兜底（全库检索）
+   │
+   └─ ④ 答题 Prompt 增强
+        PromptContext.kbIntents  → "用户在问知识库类问题"
+        PromptContext.mcpIntents → "我调了这些工具 + 结果是什么"
+```
+
+### 2.4 业内方案对比
+
+#### 方案 1：无意图识别 — 直接检索（基线）
+
+```
+Query → Embedding → 全局向量检索 → Rerank → LLM
+```
+
+**代表**：早期的朴素 RAG、大多数 RAG 教程 Demo。
+
+| 优点 | 缺点 |
+|:---|:---|
+| 零配置 | 全库检索噪声大 |
+| 零额外 LLM 调用 | 无法区分 KB vs MCP vs 闲聊 |
+| 不会分错 | 不会短路、不会引导 |
+
+#### 方案 2：规则路由 — 关键词/正则匹配
+
+```
+Query → 关键词匹配"天气" → 调天气 API
+      → 关键词匹配"文档" → KB 检索
+      → 无匹配 → 全局兜底
+```
+
+**代表**：Dify 的早期版本、LangChain 的 `LLMRouterChain`
+
+| 优点 | 缺点 |
+|:---|:---|
+| 快（不需要 LLM） | 口语化/同义词完全失效 |
+| 确定性 100% | 维护成本随规则数量指数增长 |
+| 适合固定场景 | 指代消解不了（"它怎么用？"）|
+
+#### 方案 3：语义路由 — Embedding 相似度
+
+```
+Query → Embedding → 与每个意图的描述文本算 cosine 距离
+      → 最近的那个 → 路由到对应 KB/工具
+```
+
+**代表**：Semantic Router（开源库）、LlamaIndex 的 `RouterQueryEngine`
+
+| 优点 | 缺点 |
+|:---|:---|
+| 不需要 LLM（快、便宜） | 边界模糊的 query 容易被"吸"到语义相近但错误的意图 |
+| 描述文本就是配置 | "ADK 和 React 的区别"分数接近 → 无法判定该合并还是分流 |
+| 可扩展 | 无法处理组合意图 |
+
+#### 方案 4：LLM 分类 — Ragent 方案
+
+```
+Query → LLM 一次性评所有叶子节点 → 返回 [{id, score}, ...]
+      → KB 节点 → 定向检索
+      → MCP 节点 → 工具调用
+      → SYSTEM 节点 → 闲聊
+```
+
+| 优点 | 缺点 |
+|:---|:---|
+| 口语化、指代消解全覆盖 | 每次多一次 LLM 调用（~2K tokens） |
+| 能处理复合意图 | 叶子超过 30 个 LLM 容易串分 |
+| 分数可调 threshold | 依赖 description 和 examples 质量 |
+| 三类路由统一框架 | 树结构需要人为设计 |
+
+#### 方案 5：多 Agent 委托
+
+```
+Root Agent → 判断领域
+  ├→ 财务 Agent（独立 KB + 工具）
+  ├→ 人事 Agent（独立 KB + 工具）
+  └→ 通用 Agent
+```
+
+**代表**：LangGraph 的 `StateGraph` + sub-agent、AutoGen 的 `GroupChat`
+
+| 优点 | 缺点 |
+|:---|:---|
+| 每个 Agent 独立迭代、可独立上线 | 调度开销大 |
+| 适合企业多部门场景 | Agent 之间传递信息困难 |
+| 扩展性最好 | 死循环风险高于分类方案 |
+
+#### 选方案决策框架
+
+```
+单一知识库、无工具           → 方案 1（无意图识别），够用不要过度设计
+多个 KB、有工具、领域固定     → 方案 2/3（规则/语义路由），成本低
+多个 KB、有工具、query 多样   → 方案 4（LLM 分类，Ragent 选型）
+多部门、多独立系统、需独立迭代 → 方案 5（多 Agent 委托）
+```
 
 ---
 
@@ -762,6 +911,65 @@ MultiQuestionRewriteService.rewriteWithSplit()
 ### 5.4 优化点：可让改写走本地小模型
 
 `MultiQuestionRewriteService.rewriteWithSplit()` 没有用 `llmService.chat(request, modelId)` 这个重载去指定便宜的小模型。改写不需要深度推理能力，用本地 Ollama 跑 `qwen3:8b-fp16` 完全够，节省主链路配额和成本。改造一行：调 `llmService.chat(request, "qwen3-local")` 让改写走本地 ollama。
+
+### 5.5 多轮对话与指代消解——怎么判断用户 Query 和上文有关联
+
+**不在意图识别里判断，在 Query 改写里处理**。两步串联：先改写消解指代，再意图识别分类。
+
+```
+用户第 1 轮: "Ragent 的检索通道有哪些"
+  → 改写: "Ragent 的检索通道有哪些"（首轮，无历史）
+  → 意图: ragent-retrieval (0.95)
+
+用户第 2 轮: "它的实现原理是什么"
+  → 改写时把最近 2 轮对话历史一起发给 LLM
+        历史消息:
+          user: "Ragent 的检索通道有哪些"
+          assistant: "Ragent 使用混合检索，包括语义向量检索和关键词稀疏检索..."
+        当前 query: "它的实现原理是什么"
+  → LLM 改写: "Ragent 检索通道的实现原理"  ← "它"被消解为"Ragent 检索通道"
+  → 意图: ragent-retrieval（正确命中同一个叶子）
+```
+
+**关键代码**（`MultiQuestionRewriteService.buildRewriteRequest` 行 174）：
+
+```java
+// 只保留最近 1-2 轮的 User 和 Assistant 消息（最多 4 条）
+List<ChatMessage> recentHistory = history.stream()
+    .filter(msg -> msg.getRole() == USER || msg.getRole() == ASSISTANT)
+    .skip(Math.max(0, history.size() - 4))  // 最多保留最近 4 条消息（2 轮对话）
+    .toList();
+messages.addAll(recentHistory);    // 历史拼在 system prompt 之后
+messages.add(ChatMessage.user(question)); // 当前 query 放最后
+```
+
+**改写 Prompt 里的一句关键指令**（`user-question-rewrite.st` 行 36）：
+
+```
+## 特殊场景
+- 指代词（"它"、"这个"）：结合历史消息还原具体实体
+```
+
+**示例**（`user-question-rewrite.st` 行 96）：
+
+```
+## 示例 5：指代消解（结合历史）
+历史：用户问"12306系统的架构是什么"
+输入：它的数据库用什么？
+输出：{"rewrite": "12306系统的数据库", "should_split": false,
+       "sub_questions": ["12306系统的数据库"]}
+```
+
+#### 业内其他做法
+
+| 方案 | 做法 | 代表 |
+|:---|:---|:---|
+| **改写消解**（Ragent） | 改写阶段带历史，LLM 消解指代后意图识别 | Ragent、LangChain `CondenseQuestionChain` |
+| **意图识别直接带历史** | 不先改写，意图识别的 Prompt 里同时带历史和当前 query | 部分 ReAct Agent |
+| **窗口拼接** | 不做消解，直接把最近 N 轮 query 全拼成一条去检索 | 最简单但噪声最大 |
+| **独立指代消解模型** | 用专门的 coreference resolution 模型先消解，再改 | 学术方案，生产少见 |
+
+**Ragent 选改写消解的原因**：不增加独立 LLM 调用（消解和改写合并为一步），利用改写 Prompt 里的指代规则，成本和效果平衡。缺点是历史只有最近 2 轮（最多 4 条消息），更早的上下文无法消解。
 
 ---
 
