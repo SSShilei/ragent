@@ -409,6 +409,7 @@ private List<VectorChunk> chunkOne(Block b, ChunkContext ctx) {
 }
 ```
 
+<a id="heading-handler"></a>
 ### 4.3 HeadingHandler — 不产 chunk，只累积路径
 
 HeadingHandler 维护一个按标题级别更新的路径列表：
@@ -459,6 +460,7 @@ key-value 把语义关系写进字面，sparse/dense 检索均更优（参考 RA
 - 单行体量超预算时保持整行原子，自成一块
 - 每个 chunk 都包含完整表头（数据行切到哪个 chunk，表头就跟到哪个 chunk）
 
+<a id="code-chunker"></a>
 ### 4.5 CodeChunker — 原子保护
 
 ```java
@@ -481,6 +483,7 @@ key-value 把语义关系写进字面，sparse/dense 检索均更优（参考 RA
 // 原子块：切碎 markdown 图片链接会导致前端渲染失败
 ```
 
+<a id="chunk-packer"></a>
 ### 4.8 ChunkPacker — 贪心合并与块级重叠
 
 `ChunkPacker.java:40-243`。各 chunker 只负责"单个 block 内"的切分，天然是"只拆不并"。
@@ -519,6 +522,7 @@ private static List<VectorChunk> overlapTail(List<VectorChunk> buffer, int budge
 
 ## 五、Legacy 文本策略（blocks 为空时的降级路径）
 
+<a id="fixed-size"></a>
 ### 5.1 FIXED_SIZE — FixedSizeTextChunker
 
 `FixedSizeTextChunker.java:43-324`。不是简单的按字符数切——做了三层优化：
@@ -565,6 +569,7 @@ private static List<VectorChunk> overlapTail(List<VectorChunk> buffer, int budge
 
 **与递归字符切分的本质差异**：递归字符的问题是"能找到分隔符但不知道分隔符的意义"。`\n\n` 可能是段落边界也可能是表格内的空行。STRUCTURE_AWARE 先分类再分块，避免了这个问题。
 
+<a id="structure-aware-vs-blockaware"></a>
 ### 5.2.1 STRUCTURE_AWARE vs Block-Aware：同一思路，不同精度
 
 **两者的核心逻辑完全一致**——"先识别结构，只在结构边界切分"。区别在于识别结构的手段和精度：

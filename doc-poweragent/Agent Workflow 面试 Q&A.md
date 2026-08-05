@@ -1,5 +1,6 @@
 # Agent Workflow 面试 Q\&A
 
+<a id="q1"></a>
 ## **Q1: 这个项目的 Agent 整体架构是怎样的？**
 
 ### **双框架 \+ 多智能体编排**
@@ -57,6 +58,7 @@ IntentAgent (根节点——意图路由)
 
 ---
 
+<a id="q2"></a>
 ## **Q2: 一条请求的完整执行链路是怎样的？**
 
 ```Plain Text
@@ -94,6 +96,7 @@ IntentAgent (根节点——意图路由)
 
 ---
 
+<a id="q3"></a>
 ## **Q3: 和 LangChain 的核心区别是什么？**
 
 ### **为什么选择 Google ADK 而不是 LangChain？**
@@ -141,6 +144,7 @@ async for chunk in agent.astream(
 
 ---
 
+<a id="q4"></a>
 ## **Q4: 工具系统如何设计？**
 
 ### **四种工具类型，统一调用网关**
@@ -184,6 +188,7 @@ FunctionDeclaration(
 
 ---
 
+<a id="q5"></a>
 ## **Q5: 会话和记忆如何管理？**
 
 ### **会话 \(Session\)**
@@ -225,6 +230,7 @@ def get_prompt(context):
 
 ---
 
+<a id="q6"></a>
 ## **Q6: 可观测性如何实现？**
 
 ### **三层监控**
@@ -247,6 +253,7 @@ Layer 3: Prometheus —— 指标监控
 
 ---
 
+<a id="q7"></a>
 ## **Q7: Plan\-ReAct 规划器的核心逻辑？**
 
 `CustomPlanner` 继承自 ADK 的 `PlanReActPlanner`，定义了 LLM 输出格式：
@@ -277,6 +284,7 @@ function_call(analysis, ...)
 
 ---
 
+<a id="q8"></a>
 ## **Q8: 请求模型 \(AutoAgentRequest\) 的关键字段**
 
 ```Python
@@ -305,6 +313,7 @@ class AgentMeta:
 
 ---
 
+<a id="q9"></a>
 ## **Q9: agentflow\-server 是 workflow 工作流编排吗？和 LangChain 的区别？**
 
 ### **是的，agentflow\-server 是一个可视化的 DAG 工作流编排引擎**
@@ -402,6 +411,7 @@ RunningModuleItemType
 
 ---
 
+<a id="q10"></a>
 ## **Q10: AgentFlow 分为哪些功能模块？每个模块的面试技术要点？**
 
 ### **模块全景图**
@@ -593,6 +603,7 @@ Python 端: `mem0ai` 集成, `/vector/memory/*` API
 
 ---
 
+<a id="q11"></a>
 ## **Q11: DataFlow 与 AgentFlow 如何联动？节点状态流转、调度与容错设计？**
 
 ### **DataFlow 的定位**
@@ -884,6 +895,7 @@ agentflow-server                          dataflow-server
 
 ---
 
+<a id="q12"></a>
 ## **Q12: 完整案例——从上传文档到知识库可检索的全链路**
 
 ### **场景**

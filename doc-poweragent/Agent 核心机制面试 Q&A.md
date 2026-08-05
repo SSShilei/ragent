@@ -2,6 +2,7 @@
 
 ---
 
+<a id="q1"></a>
 ## **Q1: Agent 循环流程是怎样的？ReAct 介绍**
 
 ### **1\.1 本项目中的 ReAct 循环**
@@ -109,6 +110,7 @@ async for event in runner.run_async(
 
 ---
 
+<a id="q2"></a>
 ## **Q2: Agent 死循环问题**
 
 ### **2\.1 死循环的三种场景**
@@ -184,6 +186,7 @@ async for event in runner.run_async(
 
 ---
 
+<a id="q3"></a>
 ## **Q3: Agent 请求大模型的上下文怎么组装的？**
 
 ### **3\.1 上下文组装完整链路**
@@ -288,6 +291,7 @@ async def before_model_callback(self, callback_context, llm_request):
 
 ---
 
+<a id="q4"></a>
 ## **Q4: 上下文结构是什么？**
 
 ### **4\.1 结构定义**
@@ -353,6 +357,7 @@ Content(role="user",          →    {"role": "tool",
 
 ---
 
+<a id="q5"></a>
 ## **Q5: 上下文超长了怎么办？**
 
 ### **5\.1 三级处理策略**
@@ -415,6 +420,7 @@ if (rawTextLen < maxTokens * 0.5) {
 
 ---
 
+<a id="q6"></a>
 ## **Q6: 压缩过程中丢失了工具调用历史导致重复调用怎么办？**
 
 ### **6\.1 问题场景**
@@ -513,6 +519,7 @@ if (rawTextLen < maxTokens * 0.5) {
 
 ---
 
+<a id="q7"></a>
 ## **Q7: 多 Agent 上下文如何管理？**
 
 ### **7\.1 本项目中的多 Agent 模式**
@@ -648,6 +655,7 @@ IntentAgent 生成最终回答
 
 ---
 
+<a id="q20"></a>
 ## **Q20: RAG 项目的整体架构是什么？完整构建流程是什么？**
 
 ### **架构三层**
@@ -718,6 +726,7 @@ Step 12: 异常处理
 
 ---
 
+<a id="q21"></a>
 ## **Q21: 有没有了解过 Agentic RAG 或主动式 RAG？**
 
 ### **本项目就是 Agentic RAG 的实践**
@@ -762,6 +771,7 @@ Agentic RAG: Agent 自主决策检索策略
 
 ---
 
+<a id="q22"></a>
 ## **Q22: 意图识别和 Rewrite 机制怎么实现的？**
 
 ### **意图识别——两层机制**
@@ -847,6 +857,7 @@ text += f"\n【背景知识】{rag_results}"
 
 ---
 
+<a id="q23"></a>
 ## **Q23: 知识库的召回策略是什么？检索方式是稠密、稀疏还是混合？**
 
 ### **三种检索模式**
@@ -936,6 +947,7 @@ private List<RecallResultDTO> mixSearch(KnowledgeRagDTO dto) {
 
 ---
 
+<a id="q24"></a>
 ## **Q24: 为什么要单独做 Rerank？用了什么向量模型？**
 
 ### **为什么需要 Rerank？**
@@ -980,6 +992,7 @@ List<PegRankerPrefabricationOutPutItemVO> ranker = modelService.pegRanker(modelP
 
 ---
 
+<a id="q25"></a>
 ## **Q25: 文档切片策略是什么？召回不到数据怎么处理？**
 
 ### **切片策略**
@@ -1073,6 +1086,7 @@ if (!status && param.get("moduleDefaultOutput") != null) {
 
 ---
 
+<a id="q26"></a>
 ## **Q26: RAG 文档隔离怎么做？关联文档和术语文档怎么处理？**
 
 ### **文档隔离——三层权限**
@@ -1164,6 +1178,7 @@ void batchInsertOrUpdateTermEntryData(List<TermEntrySaveDTO> dataDTOList, Boolea
 
 ---
 
+<a id="q27"></a>
 ## **Q27: Code\-RAG 怎么设计？**
 
 ### **本项目中的 Code\-RAG：Python 代码执行**
@@ -1424,6 +1439,7 @@ merge/rrfRank → reRanker → filterTokens → filterDisEnabledDatasets
 
 ---
 
+<a id="q28"></a>
 ## **Q28: 意图识别到底是什么？**
 
 ### **一句话**
@@ -1553,6 +1569,7 @@ if INTENT_ANALYSIS_WITH_TOOL_FLAG:
 
 ---
 
+<a id="q29"></a>
 ## **Q29: 意图识别和 Rewrite 的关系**
 
 ### **一句话**
@@ -1639,6 +1656,7 @@ strategy_agent PlanReAct:
 
 ---
 
+<a id="q30"></a>
 ## **Q30: DAG 引擎详细介绍**
 
 ### **一句话**
@@ -1821,6 +1839,7 @@ default Map<String, Object> executeWithTimeout(DispatchData data) {
 
 ---
 
+<a id="q31"></a>
 ## **Q31: AgentFlow DAG 引擎 vs Dify**
 
 ### **核心对比**
@@ -1855,6 +1874,7 @@ default Map<String, Object> executeWithTimeout(DispatchData data) {
 
 ---
 
+<a id="q32"></a>
 ## **Q32: DataFlow 离线跑批引擎**
 
 ### **双引擎定位**
@@ -1928,6 +1948,7 @@ if (fileSize < argoFileMax) {
 
 ---
 
+<a id="q33"></a>
 ## **Q33: AgentFlow 的核心缺点与解决方案**
 
 ### **问题一：WorkFlow 引擎——内存执行，挂了全丢**

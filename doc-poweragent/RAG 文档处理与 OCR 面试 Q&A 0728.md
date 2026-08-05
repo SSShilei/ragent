@@ -2,6 +2,7 @@
 
 ---
 
+<a id="q1"></a>
 ## **Q1: 支持的文档格式有哪些？不同格式有什么处理策略？**
 
 ### **支持的格式与解析器**
@@ -33,6 +34,7 @@ self.image_text_extract = True  # image_text_extract: 用 VLM 识别图片中的
 
 ---
 
+<a id="q2"></a>
 ## **Q2: OCR 怎么用的？原理是什么？**
 
 ### **OCR 服务的调用方式**
@@ -136,6 +138,7 @@ result = [
 
 ---
 
+<a id="q3"></a>
 ## **Q3: OCR 出现错字和截断怎么处理？**
 
 ### **错字处理——三层机制（基于源码）**
@@ -234,6 +237,7 @@ if block_index == 0 and pre_table_page_index is not None:
 
 ---
 
+<a id="q5"></a>
 ## **Q5: 主 Agent 和子 Agent 之间怎么交互？信息怎么传递？**
 
 ### **交互机制——ADK 的 transfer 模式**
@@ -391,6 +395,7 @@ except Exception as e:
 
 ---
 
+<a id="q4"></a>
 ## **Q4: 什么时候用 LLM，什么时候用正常脚本去解析？**
 
 ### **一句话**
@@ -460,6 +465,7 @@ except Exception as e:
 
 3. **长期**: 表格 key\-value 嵌入（参考 Ragent 的做法）——在 `_table2text` 或 docStorage 入库时，生成两份文本：一份 markdown 给 LLM 看、一份 key\-value 给 Embedding 用。此优化已经在 chunk 的 dual\-text 设计上有基础了
 
+<a id="q5_6"></a>
 ## **Q5: WorkFlow 引擎——内存执行，挂了全丢**
 
 **问题**: 整个 Workflow 在一个 JVM 进程中跑，`FlowContext` 是内存对象。进程崩溃 → 所有中间状态丢失。
@@ -490,6 +496,7 @@ Sentinel 在这的作用是熔断下游（LLM/ES），防止上游请求堆积�
 
 ---
 
+<a id="q6"></a>
 ## **Q6: Agent 稳定性做了哪些兜底？（防幻觉/循环调用/重试/兜底）**
 
 ### **防幻觉——三层机制**
@@ -680,6 +687,7 @@ for _ in range(MULTI_AGENT_GEN_CODE_RETRY_COUNT):  # 默认 = 1
 
 ---
 
+<a id="q7"></a>
 ## **Q7: 除了父子文档分块还有什么分块方式？怎么选型的？**
 
 ### **全部分块策略一览**

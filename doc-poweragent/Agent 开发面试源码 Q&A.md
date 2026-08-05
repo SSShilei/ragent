@@ -8,6 +8,7 @@
 
 ---
 
+<a id="q1"></a>
 ## **Q1: ReAct 循环具体怎么实现的？源码在哪？**
 
 ### **回答**
@@ -70,6 +71,7 @@ class CustomPlanner(PlanReActPlanner):
 
 ---
 
+<a id="q2"></a>
 ## **Q2: 多 Agent 的路由是怎么做的？**
 
 ### **回答**
@@ -152,6 +154,7 @@ async def before_agent_callback(callback_context):
 
 ---
 
+<a id="q3"></a>
 ## **Q3: Agent 的工具怎么注册？LLM 怎么知道有哪些工具？**
 
 ### **回答**
@@ -246,6 +249,7 @@ public JsonSerializable convert(ToolOriginalDTO toolOriginalDTO) {
 
 ---
 
+<a id="q4"></a>
 ## **Q4: 工具调用到底怎么执行的？全链路从 LLM 决定调用到返回结果**
 
 ### **回答**
@@ -325,6 +329,7 @@ async def run_async(self, *, args, tool_context):
 
 ---
 
+<a id="q5"></a>
 ## **Q5: Agent 的 session 和 state 怎么管理？**
 
 ### **回答**
@@ -390,6 +395,7 @@ async def before_agent_callback(callback_context: CallbackContext):
 
 ---
 
+<a id="q6"></a>
 ## **Q6: Agent 和 LLM 之间怎么通信的？上下文怎么传？**
 
 ### **回答**
@@ -453,6 +459,7 @@ async def after_model_callback(self, callback_context, llm_response):
 
 ---
 
+<a id="q7"></a>
 ## **Q7: streaming 端到端怎么实现的？**
 
 ### **回答**
@@ -551,6 +558,7 @@ SSEUtils.pubMsg(reqId, ANSWER, {answer: "电池...", reasoningContent: "..."});
 
 ---
 
+<a id="q8"></a>
 ## **Q8: Agent 开发时怎么调试？草稿模式是什么？**
 
 ### **回答**
@@ -611,6 +619,7 @@ async def run_async(self, *, args, tool_context):
 
 ---
 
+<a id="q9"></a>
 ## **Q9: Agent 的 Prompt 到底怎么拼接的？源码在哪？**
 
 ### **回答**
@@ -680,6 +689,7 @@ def _replace_variable(self, s: str) -> str:
 
 ---
 
+<a id="q10"></a>
 ## **Q10: Agent 的记忆功能怎么实现？长短期记忆有什么区别？**
 
 ### **回答**
@@ -721,6 +731,7 @@ def _replace_variable(self, s: str) -> str:
 
 ---
 
+<a id="q11"></a>
 ## **Q11: 工具调用失败怎么办？死循环怎么防？**
 
 ### **回答**
@@ -773,6 +784,7 @@ async def heartbeat(q):
 
 ---
 
+<a id="q12"></a>
 ## **Q12: Agent 文件上传和支持多模态怎么实现？**
 
 ### **回答**
@@ -818,6 +830,7 @@ if part.function_response:
 
 ---
 
+<a id="q13"></a>
 ## **Q13: 怎么给 Agent 加一个新工具？完整步骤**
 
 ### **回答**

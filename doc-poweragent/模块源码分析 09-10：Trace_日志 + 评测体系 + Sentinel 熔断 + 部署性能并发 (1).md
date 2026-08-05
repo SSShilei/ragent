@@ -1481,6 +1481,7 @@ public class SentinelOkHttpInterceptor implements Interceptor {
 
 
 
+<a id="q33"></a>
 ### Q33: 怎样的结构才能更好地追踪整个 Trace？日志怎么结构化？
 
 
@@ -1497,6 +1498,7 @@ public class SentinelOkHttpInterceptor implements Interceptor {
 
 
 
+<a id="q34"></a>
 ### Q34: 跨 Session 是否需要记录日志系统？
 
 
@@ -1513,6 +1515,7 @@ public class SentinelOkHttpInterceptor implements Interceptor {
 
 
 
+<a id="q35"></a>
 ### Q35: 项目的评测方法是什么？
 
 
@@ -1521,6 +1524,7 @@ public class SentinelOkHttpInterceptor implements Interceptor {
 
 
 
+<a id="q36"></a>
 ### Q36: 幻觉怎么减少？
 
 
@@ -1531,6 +1535,7 @@ public class SentinelOkHttpInterceptor implements Interceptor {
 
 - **工程侧**：检索空结果三级兜底（自定义回答 → tfSwitch 兜底分支 → LLM 自主判断），引用模板 quoteTemplate 让答案基于引用生成。
 
+<a id="q37"></a>
 ### Q37: 部署时的性能与并发控制？
 
 
@@ -1539,6 +1544,7 @@ public class SentinelOkHttpInterceptor implements Interceptor {
 
 
 
+<a id="q38"></a>
 ### Q38: 项目难点？
 
 

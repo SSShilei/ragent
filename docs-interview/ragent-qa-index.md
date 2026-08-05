@@ -1,7 +1,6 @@
-# Ragent 面试问题全集索引
+# Ragent 面试问题全集索引（可点击跳转）
 
-> 整合 `docs-interview/` 下 Ragent 相关 md 的全部问题，按模块分类。
-> 每行标注来源文件定位（章节号或行号）。
+> 点击"定位"列的链接即可跳转到对应章节。需用 IDEA 打开本目录下的文件（内置 Markdown 预览支持跨文件锚点）。
 
 ---
 
@@ -9,29 +8,28 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| Ragent 和 AgentFlow 的 Chunking 有什么区别？ | chunking-analysis 一 |
-| Parser 矩阵：6 个解析器×支持格式×路由优先级 | chunking-analysis 二 |
-| MinerU 六步异步解析流程 | chunking-analysis 二.4 |
-| MinerU 不直接输出 Block——两层分工架构 | chunking-analysis 二.5 |
-| commonmark AST 解析器原理 | chunking-analysis 二.6 |
-| 6 种 Block 详细结构（sealed interface + JSON 示例） | chunking-analysis 三 |
-| TableChunker 双文本嵌入（content vs embeddingText） | chunking-analysis 四.4 |
-| BlockAwareChunkerDispatcher 分发机制 | chunking-analysis 四.2 |
-| HeadingHandler 不产 chunk 只累积 outlinePath | chunking-analysis 四.3 |
-| CodeChunker/ListChunker/ImageChunker 策略差异 | chunking-analysis 四.5-7 |
-| ChunkPacker 贪心合并与块级重叠 | chunking-analysis 四.8 |
-| STRUCTURE_AWARE vs Block-Aware 对比（6 个覆盖不到的能力） | chunking-analysis 五.2.1 |
-| FIXED_SIZE 三层边界对齐 + normalizeText | chunking-analysis 五.1 |
-| VectorChunk 元数据字段（11 个） | chunking-analysis 六 |
-| 完整案例：Markdown 文件从解析到入库 4 阶段 | chunking-analysis 七 |
-| Parent-Child 等价方案（零额外成本） | chunking-analysis 八 |
-| 六种业界分块策略评估 | chunking-analysis 九 |
-| Chunking 面试话术（4 个模板） | chunking-analysis 十 |
-| Metadata 设计：博客 7 字段 × Ragent 对照 | chunking-analysis 十一 |
-| 每个 chunker 注入的字段对照表 + ChunkPacker 合并规则 | chunking-analysis 十一.4 |
-| Metadata 完整生命周期（Parser→Chunker→Packer→Embedding→向量库→MetadataEnrichment） | chunking-analysis 十一.5 |
-| embedding_model 字段缺失分析 | chunking-analysis 十一.3 |
-| STRUCTURE_AWARE 可以看成手动的对 markdown 分成 block 吗？ | chunking-analysis 五.2.1 |
+| Ragent 和 AgentFlow 的 Chunking 有什么区别？ | [一、对比](ragent-chunking-analysis.md#一、Ragent vs AgentFlow 的 Chunking 对比) |
+| Parser 矩阵：6 个解析器×格式×路由 | [二、Parser 矩阵](ragent-chunking-analysis.md#二、Parser 矩阵：6 个解析器 × 支持的具体格式) |
+| MinerU 六步异步解析流程 | [2.4](ragent-chunking-analysis.md#2.4 MinerU 的六步异步解析流程) |
+| MinerU 不直接输出 Block——两层分工 | [2.5](ragent-chunking-analysis.md#2.5 MinerU 不是直接输出 Block——两层分工架构) |
+| commonmark AST 解析器原理 | [2.6](ragent-chunking-analysis.md#2.6 commonmark-java AST 解析器) |
+| 6 种 Block 详细结构 | [三、Block 模型](ragent-chunking-analysis.md#三、Block 模型详解) |
+| TableChunker 双文本嵌入 | [4.4](ragent-chunking-analysis.md#4.4 TableChunker：双文本嵌入（Ragent 最大亮点）) |
+| BlockAwareChunkerDispatcher 分发机制 | [4.2](ragent-chunking-analysis.md#4.2 BlockAwareChunkerDispatcher 分发机制) |
+| HeadingHandler 不产 chunk 只累积路径 | [4.3](ragent-chunking-analysis.md#heading-handler) |
+| CodeChunker/ListChunker/ImageChunker | [4.5-4.7](ragent-chunking-analysis.md#code-chunker) |
+| ChunkPacker 贪心合并与块级重叠 | [4.8](ragent-chunking-analysis.md#chunk-packer) |
+| STRUCTURE_AWARE vs Block-Aware | [5.2.1](ragent-chunking-analysis.md#structure-aware-vs-blockaware) |
+| FIXED_SIZE 三层边界对齐 + normalizeText | [5.1](ragent-chunking-analysis.md#fixed-size) |
+| VectorChunk 元数据字段（11 个） | [六、VectorChunk](ragent-chunking-analysis.md#六、VectorChunk 元数据字段) |
+| 完整案例：解析到入库 4 阶段 | [七、完整案例](ragent-chunking-analysis.md#七、完整案例：一份 Markdown 文件从解析到入库) |
+| Parent-Child 等价方案 | [八、Parent-Child](ragent-chunking-analysis.md#八、Parent-Child 等价方案（零额外成本）) |
+| 六种业界分块策略评估 | [九、业界策略](ragent-chunking-analysis.md#九、业界六种分块策略评估) |
+| Chunking 面试话术 | [十、面试话术](ragent-chunking-analysis.md#十、面试话术) |
+| Metadata：博客 7 字段 × Ragent 对照 | [十一、Metadata](ragent-chunking-analysis.md#十一、元数据（Metadata）详解) |
+| 每个 chunker 注入字段 + 合并规则 | [11.4](ragent-chunking-analysis.md#11.4 每个 chunker 注入的字段对照表) |
+| Metadata 完整生命周期 | [11.5](ragent-chunking-analysis.md#11.5 元数据的完整生命周期) |
+| embedding_model 字段缺失分析 | [11.3](ragent-chunking-analysis.md#11.3 逐字段分析) |
 
 ---
 
@@ -39,15 +37,15 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| 意图树和 Query 重写是并行还是串行？每次都会重写吗？ | intent-rewrite-config 三 |
-| Query 重写完整链路（术语归一化→改写拆分→Multi-Query变体→精确实体短路） | intent-rewrite-config 三.2 |
-| Multi-Query 变体扩展改造前后对比（6 维度表+面试话术） | intent-rewrite-config 三.7 |
-| Multi-Query 触发条件（短query≤10字符）+ shouldExpand 逻辑 | intent-rewrite-config 三.5 |
-| 精确实体短路 ExactEntityDetector 正则设计（4 类+6 设计决策） | intent-rewrite-config 三.8 |
-| 完整 Query 决策树（6 档流程图+与业界对照矩阵） | intent-rewrite-config 三.9 |
-| 改写 query 用哪个模型？（默认 chat 模型，走 deepseek-v4-flash） | intent-rewrite-config 五 |
-| 多轮对话指代消解——怎么判断 Query 和上文关联 | intent-rewrite-config 五.5 |
-| temperature 参数：数学原理、Ragent 5 个调用点调优表 | intent-rewrite-config 六 |
+| 意图树和 Query 重写并行还是串行？ | [三、关系](ragent-intent-rewrite-config.md#三、意图树和 Query 重写是并行的吗？每次对话都重写吗？) |
+| Query 重写完整链路 | [3.2](ragent-intent-rewrite-config.md#3.2 当前 Query 重写策略（Multi-Query 改造后）) |
+| Multi-Query 改造前后对比 | [3.7](ragent-intent-rewrite-config.md#3.7 Multi-Query 改造前后对比) |
+| Multi-Query 触发条件 | [3.5](ragent-intent-rewrite-config.md#3.5 Multi-Query 变体扩展的触发条件) |
+| 精确实体短路正则设计 | [3.8](ragent-intent-rewrite-config.md#3.8 Query 决策树第一档：精确实体短路（exact-entities-bypass）) |
+| 完整 Query 决策树 6 档 | [3.9](ragent-intent-rewrite-config.md#3.9 Ragent 当前 Query 决策树（完整版）) |
+| 改写 query 用哪个模型？ | [五、改写模型](ragent-intent-rewrite-config.md#五、改写 query 用的哪个模型) |
+| 多轮对话指代消解 | [5.5](ragent-intent-rewrite-config.md#5.5 多轮对话与指代消解——怎么判断用户 Query 和上文有关联) |
+| temperature 参数调优 | [六、temperature](ragent-intent-rewrite-config.md#六、temperature 参数的作用) |
 
 ---
 
@@ -55,12 +53,11 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| 意图树有默认实现吗？怎么配置？（t_intent_node 表 + INSERT SQL） | intent-rewrite-config 一 |
-| KB 意图识别 classifyTargets 6 步流程 | intent-rewrite-config 二.1 |
-| 意图识别不只用在检索——四个消费点（歧义/闲聊/检索/Prompt增强） | intent-rewrite-config 二.2 |
-| promptSnippet vs promptTemplate 区别 | intent-rewrite-config 一.3 |
-| 业内方案对比：5 方案（无意图/规则路由/语义路由/LLM分类/多Agent） | intent-rewrite-config 二.4 |
-| 意图树为空四种能力全丢对照表 | intent-rewrite-config 二.2 |
+| 意图树有默认实现吗？怎么配置？ | [一、意图树配置](ragent-intent-rewrite-config.md#一、意图树 DefaultIntentClassifier 的实现) |
+| KB 意图识别 classifyTargets 6 步 | [2.1](ragent-intent-rewrite-config.md#2.1 classifyTargets 流程) |
+| 意图识别四个消费点 | [2.2](ragent-intent-rewrite-config.md#2.2 意图识别不只用在检索中——四个消费点) |
+| promptSnippet vs promptTemplate | [1.3](ragent-intent-rewrite-config.md#1.3 t_intent_node 表关键字段) |
+| 业内方案对比（5 方案） | [2.4](ragent-intent-rewrite-config.md#2.4 业内方案对比) |
 
 ---
 
@@ -68,12 +65,11 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| ContextFormatter 三层分支（无意图/单意图/多意图） | core-mechanisms-2 一.1 |
-| CONTEXT_FORMAT_PATH 模板结构（7 个 section） | core-mechanisms-2 一.2 |
-| 按 docId 分组 + chunkIndex 排序——等价父文档核心实现 | core-mechanisms-2 一.3 |
-| MetadataEnrichment 补什么：检索结果只有 id/text/score，回表补 docId/chunkIndex/docName | core-mechanisms-2 一.3 |
-| 多意图合并去重（chunkId 去重 + LinkedHashMap） | core-mechanisms-2 一.4 |
-| 上下文压缩怎么做？为什么不考虑 Claude Code 方式？ | deep-dive-2 六 |
+| ContextFormatter 三层分支 | [1.1](ragent-core-mechanisms-2.md#1.1 三层分支) |
+| CONTEXT_FORMAT_PATH 模板结构 | [1.2](ragent-core-mechanisms-2.md#1.2 单意图（最常见情况）) |
+| 等价父文档：docId 分组 + chunkIndex 排序 | [1.3](ragent-core-mechanisms-2.md#1.3 按文档分组 + 排序（"等价父文档"的实现）) |
+| MetadataEnrichment 补什么？ | [1.3](ragent-core-mechanisms-2.md#1.3 按文档分组 + 排序（"等价父文档"的实现）) |
+| 上下文压缩为什么不学 Claude Code？ | [六、生产工程](ragent-deep-dive-2.md#六、生产工程——真正拉开工程师差距的地方) |
 
 ---
 
@@ -81,12 +77,10 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| 检索召回率低怎么排查？（6 层框架+诊断 SQL） | deep-dive-1 一 |
-| Rerank：cross-encoder vs bi-encoder、为什么放 RRF 之后 | core-mechanisms-2 二 |
-| Rerank 模型怎么排序打分？cross-encoder 原理 | core-mechanisms-2 二 |
-| Rerank 归因日志解读（向量 vs 关键词 Rerank 前后存活率） | core-mechanisms-2 二.4 |
-| 向量化维度：1536 维 + 维度一致性校验 | chunking-analysis / notes |
-| PGVector HNSW 参数兼容修复 | 工程实践 |
+| 检索召回率低怎么排查？ | [一、排查路径](ragent-deep-dive-1.md#一、检索召回率低的排查路径) |
+| Rerank：cross vs bi-encoder | [二、Rerank](ragent-core-mechanisms-2.md#二、Rerank 详解——为什么需要两轮排序) |
+| Rerank 模型怎么排序打分？ | [2.1](ragent-core-mechanisms-2.md#2.1 Bi-encoder vs Cross-encoder) |
+| Rerank 归因日志解读 | [2.4](ragent-core-mechanisms-2.md#2.4 归因日志) |
 
 ---
 
@@ -94,10 +88,10 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| ChatQueueLimiter SSE 入口限流 | core-mechanisms-2 三.1 |
-| FairDistributedRateLimiter Redis 分布式公平队列详解 | core-mechanisms-2 三.2 |
-| 公平队列完整时间线 + 分步详解（入队/轮询/Lua原子抢占/取消/状态机） | core-mechanisms-2 三.2 |
-| 5 个安全机制对照表（entry标记/Lua/lease/RTopic/CAS） | core-mechanisms-2 三.2 |
+| ChatQueueLimiter SSE 入口限流 | [3.1](ragent-core-mechanisms-2.md#3.1 ChatQueueLimiter——SSE 入口限流) |
+| FairDistributedRateLimiter 分布式公平队列 | [3.2](ragent-core-mechanisms-2.md#3.2 FairDistributedRateLimiter——Redis 分布式公平队列) |
+| 公平队列时间线 + 分步详解 | [3.2](ragent-core-mechanisms-2.md#3.2 FairDistributedRateLimiter——Redis 分布式公平队列) |
+| 5 个安全机制对照表 | [3.2](ragent-core-mechanisms-2.md#3.2 FairDistributedRateLimiter——Redis 分布式公平队列) |
 
 ---
 
@@ -105,12 +99,11 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| SSE 完整链路（pipeline→RoutingLLMService→SseEmitter） | core-mechanisms-2 四.1 |
-| 多模型 Fallback（逐个尝试+健康标记+60s首包超时+30s半开） | core-mechanisms-2 四.2 |
-| 前端取消反向释放 permit | core-mechanisms-2 四.5 |
-| StreamTaskManager Redis 跨实例广播取消链路 | core-mechanisms-2 四.5 |
-| SSE 断线重连方案（taskId+lastEventId 进度恢复） | deep-dive-2 六.1 |
-| 用户停止后如何真正取消推理（5 步完整链路） | deep-dive-2 六.2 |
+| SSE 完整链路 | [4.1](ragent-core-mechanisms-2.md#4.1 整体链路) |
+| 多模型 Fallback | [4.2](ragent-core-mechanisms-2.md#4.2 多模型 Fallback) |
+| 前端取消反向释放 permit | [4.5](ragent-core-mechanisms-2.md#4.5 前端取消) |
+| SSE 断线重连方案 | [6.1](ragent-deep-dive-2.md#6.1 SSE 断线重连与断点续传) |
+| 用户停止后如何真正取消推理 | [6.2](ragent-deep-dive-2.md#6.2 用户停止生成后如何真正取消推理) |
 
 ---
 
@@ -118,11 +111,10 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| 间接 Prompt Injection——恶意简历案例 + 四层防护 | deep-dive-2 四.1 |
-| Text2SQL AST 校验/只读限制/成本控制/脱敏 | deep-dive-2 四.2 |
-| 敏感数据分层识别（规则→NER→LLM 三层递进） | deep-dive-2 四.3 |
-| 安全处置预案（审计/凭证撤销/泄露定位/隔离） | deep-dive-2 四.4 |
-| MCP 安全风险矩阵（Server注入/数据外泄/冒充/权限过宽/DDOS） | deep-dive-1 三.3 |
+| 间接 Prompt Injection——恶意简历案例 | [4.1](ragent-deep-dive-2.md#4.1 检索内容中的恶意指令——间接 Prompt Injection) |
+| Text2SQL AST 校验/只读/脱敏 | [4.2](ragent-deep-dive-2.md#4.2 Text2SQL——AST 校验、只读限制、脱敏) |
+| 敏感数据分层识别 | [4.3](ragent-deep-dive-2.md#4.3 敏感数据识别与脱敏) |
+| MCP 安全风险矩阵 | [3.3](ragent-deep-dive-1.md#3.3 MCP 安全风险) |
 
 ---
 
@@ -130,9 +122,9 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| 9 维评测指标体系（成功率/工具准确率/不必要调用率/引用正确率/事实一致性/接管率/延迟/完成时间/成本） | deep-dive-2 五.1 |
-| Ragent EvalController 能自动算的指标（召回率+意图准确率） | deep-dive-2 五.2 |
-| 成本分析模型（改写+意图+答题+变体+Rerank 累计） | deep-dive-2 五.4 |
+| 9 维评测指标体系 | [5.1](ragent-deep-dive-2.md#5.1 评测指标体系) |
+| EvalController 能自动算的指标 | [5.2](ragent-deep-dive-2.md#5.2 Ragent 能算哪些) |
+| 成本分析模型 | [5.4](ragent-deep-dive-2.md#5.4 成本分析（最容易被忽略的差距点）) |
 
 ---
 
@@ -140,9 +132,9 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| SSE 断线重连与断点续传（高铁场景案例） | deep-dive-2 六.1 |
-| Prompt Cache / 语义缓存 / 错误命中取舍 | deep-dive-2 六.4 |
-| Token 预算与租户成本控制 | deep-dive-2 六.5 |
+| SSE 断线重连与断点续传 | [6.1](ragent-deep-dive-2.md#6.1 SSE 断线重连与断点续传) |
+| Prompt Cache / 语义缓存 / 错误命中 | [6.4](ragent-deep-dive-2.md#6.4 Prompt Cache、语义缓存与错误命中) |
+| Token 预算与租户成本控制 | [6.5](ragent-deep-dive-2.md#6.5 Token 预算与租户成本控制) |
 
 ---
 
@@ -150,10 +142,10 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| Agent 任务状态机（6 状态→暂停→恢复→死循环防御） | deep-dive-1 二 |
-| 避免工具重复执行（幂等token+结果缓存+DB UNIQUE） | deep-dive-1 二.3 |
-| MCP 完整通信模型（5 步） | deep-dive-1 三.1 |
-| MCP vs Function Calling vs OpenAPI 对比 | deep-dive-1 三.2 |
+| Agent 任务状态机 | [二、状态机](ragent-deep-dive-1.md#二、Agent 任务状态机设计) |
+| 避免工具重复执行 | [2.3](ragent-deep-dive-1.md#2.3 避免工具重复执行) |
+| MCP 完整通信模型 | [3.1](ragent-deep-dive-1.md#3.1 MCP 完整通信流程) |
+| MCP vs Function Calling vs OpenAPI | [3.2](ragent-deep-dive-1.md#3.2 vs Function Calling vs OpenAPI) |
 
 ---
 
@@ -161,37 +153,23 @@
 
 | 问题 | 定位 |
 |:---|:---|
-| @RagTraceNode 注解式全链路 Trace（ThreadLocal+TTL+节点栈） | core-mechanisms-3 |
-| 文档自动同步三级变更检测（ETag→Last-Modified→SHA-256） | core-mechanisms-3 |
-| Pipeline 数据通道 vs 直接分块 | core-mechanisms-3 |
-| 降级策略：LLM 失败→切备选→兜底消息 | core-mechanisms-3 |
+| @RagTraceNode 全链路 Trace | [core-mechanisms-3](ragent-core-mechanisms-3.md) |
+| 文档自动同步三级变更检测 | [core-mechanisms-3](ragent-core-mechanisms-3.md) |
+| Pipeline 数据通道 vs 直接分块 | [core-mechanisms-3](ragent-core-mechanisms-3.md) |
+| 降级策略 | [core-mechanisms-3](ragent-core-mechanisms-3.md) |
 
 ---
 
-## 13. Coremechanisms 第三篇（全链路 / MCP / 评测等）
+## 13. 基础笔记
 
-从 `ragent-core-mechanisms-3.md` 提取
-
----
-
-## 14. 基础笔记（notes / notes-2）
-
-覆盖项目概览、7 步流水线、数据库 20 张表、长短期记忆、向量库 Milvus 等。
-详见 `ragent-interview-notes.md` 和 `ragent-interview-notes-2.md`。
+项目概览 / 7 步流水线 / 数据库 20 张表 / 长短期记忆 / 向量库 Milvus：
+- [ragent-interview-notes.md](ragent-interview-notes.md)
+- [ragent-interview-notes-2.md](ragent-interview-notes-2.md)
 
 ---
 
-## 文件缩写
+## 说明
 
-| 文件 | 行数 | 定位 |
-|:---|:---|:---|
-| chunking-analysis | 1108 | Chunking 专题（Parser/Block/分块/Metadata/业界策略） |
-| intent-rewrite-config | 1059 | 意图树+Query重写+决策树+temperature |
-| core-mechanisms-2 | 443 | Context组装/Rerank/限流并发/SSE流式 |
-| core-mechanisms-3 | 407 | 全链路Trace/分布式调度/MCP/评测/降级/权限 |
-| deep-dive-1 | 354 | 深水区上：召回排查/Agent状态机/MCP安全 |
-| deep-dive-2 | 299 | 深水区下：RAG安全/评测/生产工程 |
-| interview-notes | 1116 | 原版笔记：管线细节/切分案例/设计模式 |
-| interview-notes-2 | 1381 | 扩展版：表结构/意图树/RRF归一化/Agentic RAG |
-| resume-qa-0804 | 933 | PA简历QA主文档 |
-| qa-index | 216 | PA问题分类索引 |
+- 链接格式 `[text](文件.md#标题锚点)`，锚点 = 目标文件的章节标题
+- 在 IDEA 中打开本文件，按住 Ctrl 点击链接跳转（Markdown 预览里是普通点击）
+- 若某条中文锚点跳转失败，是因为该标题含特殊字符（如 `—`、`×`），在源文件里用 Ctrl+F 搜标题即可定位
