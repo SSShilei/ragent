@@ -71,6 +71,28 @@
 | 等价父文档：docId 分组 + chunkIndex 排序 | [1.3](<ragent-core-mechanisms-2.md#1.3 按文档分组 + 排序（"等价父文档"的实现）>) |
 | MetadataEnrichment 补什么？ | [1.3](<ragent-core-mechanisms-2.md#1.3 按文档分组 + 排序（"等价父文档"的实现）>) |
 | 上下文压缩为什么不学 Claude Code？ | [六、生产工程](<ragent-deep-dive-2.md#六、生产工程——真正拉开工程师差距的地方>) |
+| ★ 上下文压缩/摘要/短期记忆三者关系（完整链路解析） | [压缩全链路详解](<ragent-context-compression-deep-dive.md>) |
+| 压缩触发条件（四条命门）？ | [3. 压缩引擎内部](<ragent-context-compression-deep-dive.md#3-压缩引擎内部四条命门>) |
+| 摘要是同步还是异步？什么时候生效？ | [7. 异步模型详解](<ragent-context-compression-deep-dive.md#7-异步模型详解什么时候用户能看到摘要效果>) |
+| 摘要写入了短期记忆吗？存哪？ | [1. 三个概念的物理边界](<ragent-context-compression-deep-dive.md#1-先厘清三个概念的物理边界>) / [5. 摘要写入存储](<ragent-context-compression-deep-dive.md#5-摘要的写入存储>) |
+| 压缩算法的具体公式和参数？ | [4. LLM 摘要调用的精确参数](<ragent-context-compression-deep-dive.md#4-llm-摘要调用的精确参数>) / [8. 配置项全景](<ragent-context-compression-deep-dive.md#8-配置项全景>) |
+| 多轮对话中不相关问题怎么去除噪声？ | [13. 多轮对话中的噪声去除](<ragent-context-compression-deep-dive.md#13-多轮对话中的噪声去除不相关的问题怎么办>) |
+| 去噪的改写窗口怎么裁？为什么过滤 System 摘要？ | [13.2 防线①](<ragent-context-compression-deep-dive.md#132-ragent-现状三道防线全部有代码定位>) |
+| 为什么不做语义相关度过滤历史？ | [13.3 现状的局限](<ragent-context-compression-deep-dive.md#133-现状的局限窗口是最近的不是最相关的>) |
+| 进阶：历史相关度过滤/话题感知方案对比 | [13.4 进阶方案](<ragent-context-compression-deep-dive.md#134-进阶方案如果要支持长对话--深度分析>) |
+| ★ AgentFlow 短期记忆摘要和上下文压缩有关吗？ | [14. AgentFlow 短期记忆摘要与上下文压缩的关系](<ragent-context-compression-deep-dive.md#14-agentflow-短期记忆摘要与上下文压缩的关系>) |
+| Ragent vs PA 压缩方案场景对比 | [15. 两种方案场景对比](<ragent-context-compression-deep-dive.md#15-两种方案场景对比>) |
+| ★ 上下文压缩的 8 个痛点全景分析 | [16. 上下文压缩的痛点分析](<ragent-context-compression-deep-dive.md#16-上下文压缩的痛点分析>) / [17. 痛点总结与解决思路](<ragent-context-compression-deep-dive.md#17-痛点总结与解决思路一览>) |
+| ★ Claude Code 的上下文压缩策略（五层防线） | [18. Claude Code 的上下文压缩与记忆体系](<ragent-context-compression-deep-dive.md#18-claude-code-的上下文压缩与记忆体系业界前沿参考>) |
+| Claude Code 记忆系统的四级分层 + T0-T3 社区方案 | [18.3 记忆系统四级文件层级](<ragent-context-compression-deep-dive.md#183-claude-code-记忆系统四级文件层级--社区方案>) |
+| Claude Code Subagents 上下文隔离机制 | [18.4 Subagents：上下文隔离的架构级解法](<ragent-context-compression-deep-dive.md#184-subagents上下文隔离的架构级解法>) |
+| ★ 三种方案终局对比（Ragent vs PA vs Claude Code） | [19. 三种方案的终局对比](<ragent-context-compression-deep-dive.md#19-三种方案的终局对比>) |
+| 面试加分回答模板（你们和 Claude Code 比怎么样？） | [20. 面试加分回答模板](<ragent-context-compression-deep-dive.md#20-面试加分回答模板>) |
+| ★ 四种方案横向对比：各自解决什么、带来什么、互相学什么 | [21. 四种方案的横向对比](<ragent-context-compression-deep-dive.md#21-四种方案的横向对比各自解决什么带来什么互相学什么>) |
+| 理想上下文压缩方案的分层设计 | [21.5 终局思考](<ragent-context-compression-deep-dive.md#215-终局思考如果要设计一个理想的上下文压缩方案>) |
+| ★ Badcase 怎么处理？（失败模式 + 三层应对策略） | [22. Badcase 处理](<ragent-context-compression-deep-dive.md#22-badcase-处理上下文压缩的失败模式与应对>) |
+| Badcase 面试话术 | [22.4 面试话术](<ragent-context-compression-deep-dive.md#224-面试话术>) |
+| 四系统 Badcase 处理对照表 | [22.5 对照表](<ragent-context-compression-deep-dive.md#225-badcase-处理对照表>) |
 
 ---
 
