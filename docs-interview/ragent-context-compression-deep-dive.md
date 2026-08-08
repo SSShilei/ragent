@@ -5,6 +5,7 @@
 
 ---
 
+<a id="compress-concepts"></a>
 ## 1. 先厘清三个概念的物理边界
 
 | | 短期记忆 | 上下文压缩 | 摘要 |
@@ -129,6 +130,7 @@ StreamChatEventHandler.onComplete()           [L157]
 
 ---
 
+<a id="compress-engine"></a>
 ## 3. 压缩引擎内部：四条命门
 
 `doCompressIfNeeded()` 的完整逻辑（`JdbcConversationMemorySummaryService.java:99-175`）：
@@ -238,6 +240,7 @@ createSummary(conversationId, userId, summary, lastMessageId);
 
 ---
 
+<a id="compress-llm-params"></a>
 ## 4. LLM 摘要调用的精确参数
 
 ```java
@@ -286,6 +289,7 @@ String result = llmService.chat(request);  // ← 同步调用（非流式）
 
 ---
 
+<a id="compress-summary-storage"></a>
 ## 5. 摘要的写入存储
 
 ```java
@@ -383,6 +387,7 @@ private List<ChatMessage> attachSummary(ChatMessage summary, List<ChatMessage> m
 
 ---
 
+<a id="compress-async-model"></a>
 ## 7. 异步模型详解：什么时候用户能 "看到" 摘要效果？
 
 ### 时序图
@@ -441,6 +446,7 @@ CallerRunsPolicy 的含义：队列满 200 时，第 201 个压缩任务由调�
 
 ---
 
+<a id="compress-config"></a>
 ## 8. 配置项全景
 
 ```yaml
@@ -570,6 +576,7 @@ loadHistory 的结果（8 轮原文 + 摘要）
 
 ---
 
+<a id="compress-noise-removal"></a>
 ## 13. 多轮对话中的噪声去除：不相关的问题怎么办？
 
 > 面试问题：**多轮对话中，如果有一些问题不相关，怎么去除噪声？**
@@ -582,6 +589,7 @@ loadHistory 的结果（8 轮原文 + 摘要）
 - 浪费 token：无关轮次占用上下文窗口，挤掉真正相关的检索结果
 - 误导检索：改写阶段若参考了无关轮次，可能把不相关的实体写进改写后的 query
 
+<a id="compress-noise-defense"></a>
 ### 13.2 Ragent 现状：三道防线（全部有代码定位）
 
 #### 防线 ①：改写窗口截断——噪声挡在改写阶段之外
@@ -612,6 +620,7 @@ messages.add(ChatMessage.user(question));
 
 `JdbcConversationMemoryStore.loadHistory()` 用 `LIMIT historyKeepTurns*2`（=16 条消息 / 8 轮），更早的轮次在 DB 查询层直接不加载。
 
+<a id="compress-noise-limits"></a>
 ### 13.3 现状的局限：窗口是"最近的"，不是"最相关的"
 
 三道防线本质都是 **时间窗口**，不是 **语义过滤**。存在的问题：
@@ -625,6 +634,7 @@ messages.add(ChatMessage.user(question));
 - 场景匹配：KB 问答是"一问一答"模式，跨轮依赖弱，指代消解用 2 轮窗口基本够
 - 摘要本身就是降噪：摘要只记"话题+状态+约束"，明确禁止记答案，天然过滤掉对话过程噪声
 
+<a id="compress-noise-advanced"></a>
 ### 13.4 进阶方案：如果要支持长对话 / 深度分析
 
 按成本从低到高：
@@ -652,6 +662,7 @@ messages.add(ChatMessage.user(question));
 
 ---
 
+<a id="compress-agentflow"></a>
 ## 14. AgentFlow 短期记忆摘要与上下文压缩的关系
 
 > 面试问题：**AgentFlow 的短期记忆摘要和上下文压缩有关吗？**
@@ -775,6 +786,7 @@ Ragent                              PA (Java 侧)
 
 ---
 
+<a id="compress-scenario-compare"></a>
 ## 15. 两种方案场景对比
 
 ### 15.1 核心差异归纳
@@ -821,6 +833,7 @@ Ragent                              PA (Java 侧)
 
 ---
 
+<a id="compress-pain-points"></a>
 ## 16. 上下文压缩的痛点分析
 
 ### 痛点 1：信息丢失不可逆——截断丢工具调用配对
@@ -911,6 +924,7 @@ Ragent 用 Redisson `tryLock()`（非阻塞），拿不到锁就跳过——这�
 
 ---
 
+<a id="compress-pain-summary"></a>
 ## 17. 痛点总结与解决思路一览
 
 | 痛点 | 严重程度 | 当前缓解手段 | 改进方向 |
@@ -926,6 +940,7 @@ Ragent 用 Redisson `tryLock()`（非阻塞），拿不到锁就跳过——这�
 
 ---
 
+<a id="compress-claude-code"></a>
 ## 18. Claude Code 的上下文压缩与记忆体系（业界前沿参考）
 
 > 研究 Claude Code 如何解决同样的问题，提取可借鉴的设计思想。
@@ -971,6 +986,7 @@ Claude Code 的 `/compact` 不是自由文本摘要，而是**按固定结构输
 
 对比 Ragent 的摘要（`conversation-summary.st`）：`"用户咨询了【话题1】（状态）、【话题2】（状态）。约束：xxx。关键词：xxx"`——本质也是结构化，但只有 3 个维度（话题/状态/约束），远不如 Claude Code 的九段丰富。
 
+<a id="compress-claude-memory"></a>
 ### 18.3 记忆系统：四级文件层级 + T0-T3 社区方案
 
 #### 内置四级层级
@@ -997,6 +1013,7 @@ Claude Code 的 `/compact` 不是自由文本摘要，而是**按固定结构输
 
 结果：从 9500 token 降至 1760 token——**81% 节省**。
 
+<a id="compress-claude-subagents"></a>
 ### 18.4 Subagents：上下文隔离的架构级解法
 
 ```
@@ -1051,6 +1068,7 @@ Claude Code 在压缩后把 CLAUDE.md/system prompt/auto memory 等**稳定前�
 
 ---
 
+<a id="compress-final-compare"></a>
 ## 19. 三种方案的终局对比
 
 | 维度 | Ragent | AgentFlow (PA) | Claude Code |
@@ -1067,6 +1085,7 @@ Claude Code 在压缩后把 CLAUDE.md/system prompt/auto memory 等**稳定前�
 
 ---
 
+<a id="compress-interview-template"></a>
 ## 20. 面试加分回答模板
 
 如果被问到 "你们项目的上下文压缩相比 Claude Code 怎么样？"：
@@ -1079,6 +1098,7 @@ Claude Code 在压缩后把 CLAUDE.md/system prompt/auto memory 等**稳定前�
 
 ---
 
+<a id="compress-four-way-compare"></a>
 ## 21. 四种方案的横向对比：各自解决什么、带来什么、互相学什么
 
 ### 21.1 各自方案一览
@@ -1203,6 +1223,7 @@ Claude Code 在压缩后把 CLAUDE.md/system prompt/auto memory 等**稳定前�
 | Sub-agent 上下文隔离 | Ragent | KB 问答通常不需要，但若扩展到工具调用型 Agent，把重 I/O 的检索任务 delegate 给子 Agent，只回传引用摘要 |
 | 前四层零 API 调用 | **全部三者** | 核心思想：能用规则/简单的就不调 LLM。Ragent 可以加 micro-compact（删除旧检索结果），Agent 模式可以加 budget reduction（预丢弃工具结果），ChatNode 可以加 snip（裁剪非关键系统消息） |
 
+<a id="compress-ideal-design"></a>
 ### 21.5 终局思考：如果要设计一个"理想"的上下文压缩方案
 
 从四种方案的得失中，可以归纳出一个理想方案应该有的层次：
@@ -1235,6 +1256,7 @@ Sources:
 
 ---
 
+<a id="compress-badcase"></a>
 ## 22. Badcase 处理：上下文压缩的失败模式与应对
 
 > 面试问题：**上下文压缩出了 badcase 怎么处理？**
@@ -1353,6 +1375,7 @@ if (!lock.tryLock()) {
 | 摘要滞后轮数 | 用户看到摘要效果的延迟 | ❌ |
 | 摘要触发频次 | 每 N 轮触发一次是正常的；每轮触发说明半窗重叠失效 | ❌ |
 
+<a id="compress-badcase-interview"></a>
 ### 22.4 面试话术
 
 > "上下文压缩的 badcase 分三类处理。第一类是预防——设计阶段就消除。比如 Claude Code 的前四层零 API 压缩，清除的是可随时重取的工具结果，失败了也无所谓。Ragent 改写阶段显式滤掉摘要，防止摘要污染指代消解。这些是从架构上避免 badcase。
@@ -1361,6 +1384,7 @@ if (!lock.tryLock()) {
 >
 > 第三类是可观测——但目前是我们共同的短板。摘要的成功率、质量、滞后程度都没有指标化，出了 badcase 只能靠用户反馈或看日志。如果要增强，我会在三个方面补：摘要 LLM 失败告警、摘要内容长度异常告警、锁冲突频率监控。"
 
+<a id="compress-badcase-table"></a>
 ### 22.5 Badcase 处理对照表
 
 | 场景 | Ragent | ChatNode | Agent 模式 | Claude Code |

@@ -4,6 +4,7 @@
 
 ---
 
+<a id="rag-trace"></a>
 ## 一、全链路追踪（RagTrace）
 
 ### 1.1 设计：TTL 透传 + AOP 无侵入
@@ -94,6 +95,7 @@ trace
 
 ---
 
+<a id="distributed-schedule"></a>
 ## 二、分布式调度（文档自动同步）
 
 ### 2.1 整体流程
@@ -251,6 +253,7 @@ GET /rag/eval?question=Block 体系是什么
 
 ---
 
+<a id="degradation-strategy"></a>
 ## 五、降级策略（降级矩阵）
 
 Ragent 在多处有降级保护：
@@ -320,6 +323,7 @@ catch (Exception e) { log.warn("关键词索引同步失败，已跳过", e); }
 
 ---
 
+<a id="pipeline-vs-chunk"></a>
 ## 六、Pipeline 数据通道 vs 直接分块
 
 之前问过这两个处理模式的区别，这里展开：

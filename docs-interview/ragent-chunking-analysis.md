@@ -4,6 +4,7 @@
 
 ---
 
+<a id="chunking-compare"></a>
 ## 一、Ragent vs AgentFlow 的 Chunking 对比
 
 ### 1.1 Ragent（Java）— 两层架构，结构感知优先
@@ -76,6 +77,7 @@ AgentFlow 的分块策略覆盖了从纯文本到 OCR 扫描件、从表格到�
 
 ---
 
+<a id="parser-matrix"></a>
 ## 二、Parser 矩阵：6 个解析器 × 支持的具体格式
 
 ### 2.1 ParserType 枚举
@@ -127,6 +129,7 @@ ImageDocumentParser      ✗            ✗              ✗           ✅      
 
 **MinerU 是唯一覆盖全部 6 种 Block 的解析器，但注意：MinerU 不直接输出 Block。**
 
+<a id="mineru-six-step"></a>
 ### 2.4 MinerU 的六步异步解析流程
 
 `MinerUDocumentParser.parseStructured()` 的实际执行链路（`MinerUDocumentParser.java:126`）：
@@ -142,6 +145,7 @@ ImageDocumentParser      ✗            ✗              ✗           ✅      
 
 **关键参数**（`BatchSubmitRequest`）：`ocr`、`enableTable`、`enableFormula`、`language`。
 
+<a id="mineru-two-layer"></a>
 ### 2.5 MinerU 不是直接输出 Block——两层分工架构
 
 MinerU API 返回的是一个 **zip 文件**，里面只有 `{markdown内容, 图片文件}`。Ragent 拿到后的处理链：
@@ -185,6 +189,7 @@ MinerU zip → 解包得到 {markdown内容, 图片文件}
 
 **MinerU 解决的是"PDF/Word/PPT 这种二进制格式 → 结构化 markdown"的问题，markdown → 6 种 Block 是 Ragent 自己的代码。没有 MinerU，Ragent 也能从 Markdown 文件产出 6 种 Block（通过 MarkdownDocumentParser）；但没有 MinerU，PDF/Word/PPT 就只能走 Tika 降级为 ParagraphBlock 平文本，丢失全部结构信息。**
 
+<a id="commonmark-ast"></a>
 ### 2.6 commonmark-java AST 解析器
 
 `commonmark-java` 是一个开源 Markdown 解析器。Ragent 用它做第二层转换：markdown 字符串 → AST 树 → Block 列表。
@@ -248,6 +253,7 @@ for (String segment : text.split("\\n{2,}")) {
 
 ---
 
+<a id="block-model"></a>
 ## 三、Block 模型详解
 
 ### 3.1 公共基类：sealed interface Block
@@ -377,6 +383,7 @@ public List<VectorChunk> chunk(List<Block> blocks, String fallbackText,
 
 三路判断的优先级：不分块哨兵 > block-aware > legacy 文本策略。
 
+<a id="chunker-dispatcher"></a>
 ### 4.2 BlockAwareChunkerDispatcher 分发机制
 
 `BlockAwareChunkerDispatcher.dispatch()`（`BlockAwareChunkerDispatcher.java:62`）：
@@ -423,6 +430,7 @@ HeadingHandler 维护一个按标题级别更新的路径列表：
 
 **不产 chunk 的设计理由**：标题是结构信息，不是可检索的知识。把标题文本作为单独 chunk 入向量库毫无意义——没有人会搜"第一章 入职流程"。正确的是把标题注入后续 chunk 的 `outlinePath`，让 LLM 看到命中 chunk 时知道它属于哪个章节。
 
+<a id="table-chunker"></a>
 ### 4.4 TableChunker：双文本嵌入（Ragent 最大亮点）
 
 `TableChunker.java:42-86`。每个 chunk 包含三种文本：
@@ -611,6 +619,7 @@ public enum ChunkingMode {
 
 ---
 
+<a id="vector-chunk-metadata"></a>
 ## 六、VectorChunk 元数据字段
 
 `VectorChunk.java:43-118`。比 LangChain Document 的 metadata 更结构化：
@@ -631,6 +640,7 @@ public enum ChunkingMode {
 
 ---
 
+<a id="full-example"></a>
 ## 七、完整案例：一份 Markdown 文件从解析到入库
 
 输入 `员工手册.md`：
@@ -764,6 +774,7 @@ Block[11] ListBlock(ordered=true, items=3)
 
 ---
 
+<a id="parent-child"></a>
 ## 八、Parent-Child 等价方案（零额外成本）
 
 ```
@@ -787,6 +798,7 @@ AgentFlow 没有显式的父子文档机制，靠 `ChatContextFilter` 上下文�
 
 ---
 
+<a id="industry-strategies"></a>
 ## 九、业界六种分块策略评估
 
 > 这六种不是并列选项，而是三层递进——前三种是"怎么切"（算法），后三种是"按什么边界切"（结构约束）。
@@ -860,6 +872,7 @@ AgentFlow 没有显式的父子文档机制，靠 `ChatContextFilter` 上下文�
 
 ---
 
+<a id="interview-talk-points"></a>
 ## 十、面试话术
 
 ### "介绍一下 Ragent 的文档切分策略"
@@ -898,6 +911,7 @@ AgentFlow 没有显式的父子文档机制，靠 `ChatContextFilter` 上下文�
 
 ---
 
+<a id="metadata-details"></a>
 ## 十一、元数据（Metadata）详解
 
 > 每个 Chunk 入库时携带的元数据是投入产出比最高的一步——保留成本极低，但不保留就几乎无法事后重建。
@@ -946,6 +960,7 @@ embedding_model     无                                ❌ 没有
 created_at          chunkId(Snowflake)可反解时间       ⚠️ 有隐含时间，无显式字段
 ```
 
+<a id="metadata-field-analysis"></a>
 ### 11.3 逐字段分析
 
 **① section_path → outlinePath（✅ 更强）**
@@ -985,6 +1000,7 @@ Ragent 的 `doc_type` 存在 `t_knowledge_document` 表里（文档级别的分�
 
 `chunkId` 用 Snowflake 雪花 ID，前 41 位是时间戳（毫秒），可反解出创建时间。但不是显式字段，要写 SQL 函数才能直接用时间过滤。博客建议显式存 `created_at` 主要是为了"找出旧模型建的 chunk 定向重建"——和 ⑥ 是同一个需求。
 
+<a id="metadata-chunker-fields"></a>
 ### 11.4 每个 chunker 注入的字段对照表
 
 这是前面"HeadingHandler 累积路径注入到后续块的元数据"问题的完整答案——不仅 outlinePath，每个 chunker 在构建 VectorChunk 时各注入了不同字段：
@@ -1024,6 +1040,7 @@ metadata            ❌          ❌         ❌           ❌         ❌
 | **embeddingText** | 逐块按 `\n\n` 拼接 | 图片描述文本拼在一起，保留 embedding 信息 |
 | **content** | 逐块按 `\n\n` 拼接 | 段落间保留空行分隔 |
 
+<a id="metadata-lifecycle"></a>
 ### 11.5 元数据的完整生命周期
 
 ```

@@ -8,6 +8,7 @@
 
 安全在 RAG 里有**三个攻击面**：Input（用户 query）、Retrieval（文档/网页/Tool 内容）、Output（LLM 生成）。
 
+<a id="indirect-prompt-injection"></a>
 ### 4.1 检索内容中的恶意指令——间接 Prompt Injection
 
 **攻击场景**：用户上传文档或网页，内容含隐藏指令
@@ -53,6 +54,7 @@ Layer 4: 审计追踪
 
 Ragent 的 `DefaultContextFormatter` 用了模板包裹（一.2 的 `renderKbSection`），有结构隔离的基础。但内容扫描和降级兜底未做。
 
+<a id="text2sql-security"></a>
 ### 4.2 Text2SQL——AST 校验、只读限制、脱敏
 
 **AST 校验**：LLM 生成 SQL 后，用 SQL Parser 解析 AST，校验：
@@ -68,6 +70,7 @@ Ragent 的 `DefaultContextFormatter` 用了模板包裹（一.2 的 `renderKbSec
 
 **脱敏**：返回结果中匹配到的 PII（身份证号/手机号/邮箱）在进 LLM context 前替换为 `[REDACTED]`
 
+<a id="sensitive-data"></a>
 ### 4.3 敏感数据识别与脱敏
 
 不是靠正则就够了——RAG 场景的挑战是**上下文关联敏感**。一个"张三"单独出现不敏感，但加上"身份证 110101..."就敏感了。
@@ -112,6 +115,7 @@ Level 3: LLM 上下文判断（最准、最贵）
 
 ## 五、Agent 评测——多维度的质量与成本
 
+<a id="eval-metrics"></a>
 ### 5.1 评测指标体系
 
 | 维度 | 指标 | 怎么算 |
@@ -126,6 +130,7 @@ Level 3: LLM 上下文判断（最准、最贵）
 | **任务完成时间** | 端到端 ms | 从请求进来到最后一 byte 的时间 |
 | **成本** | $/task | LLM token 消耗 × 单价 |
 
+<a id="eval-ragent"></a>
 ### 5.2 Ragent 能算哪些
 
 EvalController（`/rag/eval`）当前能自动算：
@@ -144,6 +149,7 @@ EvalController（`/rag/eval`）当前能自动算：
 
 关键是 `reference_doc_ids` 要与 `t_knowledge_document.doc_name` 对齐——Ragent 做 docName → docId 的转换保证对齐。
 
+<a id="cost-analysis"></a>
 ### 5.4 成本分析（最容易被忽略的差距点）
 
 ```
@@ -168,8 +174,10 @@ EvalController（`/rag/eval`）当前能自动算：
 
 ---
 
+<a id="production-engineering"></a>
 ## 六、生产工程——真正拉开工程师差距的地方
 
+<a id="sse-reconnect"></a>
 ### 6.1 SSE 断线重连与断点续传
 
 **问题**：SSE 是基于 HTTP 的长连接，网络波动时连接断了，前端看不到后续 token。
@@ -217,6 +225,7 @@ SseEmitter：
  ⑤ 已失败/超时的 → 返回错误 + 原因
 ```
 
+<a id="cancel-inference"></a>
 ### 6.2 用户停止生成后如何真正取消推理
 
 不是关浏览器就完事了——后端推理进程可能还在 GPU 上烧计算。
@@ -251,6 +260,7 @@ SseEmitter：
                    → 2 次连续 fail → 30s 半开
 ```
 
+<a id="prompt-cache"></a>
 ### 6.4 Prompt Cache、语义缓存与错误命中
 
 ```
@@ -270,6 +280,7 @@ Prompt Cache:
 
 **Ragent 当前没有实现任何缓存层**——每轮 query 都从头跑到尾。这是成本优化的最大缺口。
 
+<a id="token-budget"></a>
 ### 6.5 Token 预算与租户成本控制
 
 **Token 预算模型**：

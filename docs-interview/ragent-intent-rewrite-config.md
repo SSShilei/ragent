@@ -4,6 +4,7 @@
 
 ---
 
+<a id="intent-tree-config"></a>
 ## 一、意图树 DefaultIntentClassifier 的实现
 
 ### 1.1 默认实现 = 没有，但 IO 层已就绪
@@ -25,6 +26,7 @@
 
 缓存加载是惰性的，第一次请求从 DB 加载并写 Redis。意图节点增删改时通过 `clearIntentTreeCache()` 清缓存强制重读。
 
+<a id="intent-node-table"></a>
 ### 1.3 t_intent_node 表关键字段
 
 | 列 | 作用 | 取值示例 |
@@ -144,6 +146,7 @@ ORDER BY intent_code;
 
 ## 二、意图识别（KB 意图怎么识别）
 
+<a id="classify-targets"></a>
 ### 2.1 classifyTargets 流程
 
 `DefaultIntentClassifier.classifyTargets()`（`DefaultIntentClassifier.java:136`）：
@@ -191,6 +194,7 @@ private String buildPrompt(List<IntentNode> leafNodes) {
 .thinking(false)
 ```
 
+<a id="intent-consumers"></a>
 ### 2.2 意图识别不只用在检索中——四个消费点
 
 意图识别的结果（`List<NodeScore>`）在流水线里被用了四处，检索只是其中之一：
@@ -279,6 +283,7 @@ resolveIntents() 产出 List<SubQuestionIntent>
         PromptContext.mcpIntents → "我调了这些工具 + 结果是什么"
 ```
 
+<a id="industry-intent-compare"></a>
 ### 2.4 业内方案对比
 
 #### 方案 1：无意图识别 — 直接检索（基线）
@@ -370,6 +375,7 @@ Root Agent → 判断领域
 
 ---
 
+<a id="intent-rewrite-relation"></a>
 ## 三、意图树和 Query 重写是并行的吗？每次对话都重写吗？
 
 ### 3.1 不并行，串行
@@ -394,6 +400,7 @@ public void execute(StreamChatContext ctx) {
 
 **为什么必须串行**：意图识别的输入是 Query 重写的输出。改写把"它怎么用？"消解成"OA 怎么用？RBAC 怎么设置？"两个子问句后，意图识别才能分两次对每个子问句做意图命中。如果不重写直接做意图识别，口语化/指代会让命中率掉一大截。
 
+<a id="rewrite-strategy"></a>
 ### 3.2 当前 Query 重写策略（Multi-Query 改造后）
 
 `MultiQuestionRewriteService.rewriteWithSplit()` 实际链路：
@@ -438,6 +445,7 @@ rag:
 | 开 | 关 | 1 次（改写, T=0.1）+ 1 次（意图识别, T=0.1）+ 1 次（答题, T=0）= 3 次 |
 | 开 | 触发 | 1 次（改写, T=0.1）+ 1 次（变体生成, T=0.7）+ 1 次（意图识别）+ 1 次（答题）= 4 次 |
 
+<a id="multi-query-trigger"></a>
 ### 3.5 Multi-Query 变体扩展的触发条件
 
 `MultiQuestionRewriteService.shouldExpand()`（行 252）：
@@ -472,6 +480,7 @@ ChatRequest.builder()
 
 **注意**：变体扩展只对 **subQuestions.size() == 1** 的单子问题生效。`IntentResolver.resolve()` 在分发的 `SubQuestionIntent` 时才把 variants 传到检索层。检索层 `RetrievalEngine.retrieveWithVariants()` 让每个变体并行跑多通道检索，结果按 chunkId 去重合并（变体 0=原始 query 的优先级最高）。
 
+<a id="multi-query-compare"></a>
 ### 3.7 Multi-Query 改造前后对比
 
 #### 数据模型层
@@ -555,6 +564,7 @@ public record RewriteResult(String rewrittenQuestion, List<String> subQuestions,
 
 > Ragent 原来的 Query 重写只产出一个改写 query，单子问题时召回率受限于单一表达。我做了一个 Multi-Query 变体扩展——在改写完成后加 maybeExpandVariants 步骤，对短 query 或模糊 query 调用一次 LLM（temperature 拉高到 0.7）生成 3 个不同角度的语义变体。检索阶段每个变体并行多通道检索再按 chunkId 去重合并，原始 rewrite 永远排第一保证优先级。开关默认关，不影响存量行为；触发条件用 query 长度阈值控制，避免长 query 发散到不相关领域。改造后召回率提升明显，特别在概念有多重表达的领域知识库场景。
 
+<a id="query-decision-tree"></a>
 ### 3.9 Ragent 当前 Query 决策树（完整版）
 
 基于实际代码的完整 Query 处理决策树：
@@ -699,6 +709,7 @@ Step-back 是"对太具体的 query 让 LLM 提炼出更抽象的问题，双路
 **Q: 短路和 query-rewrite 总开关的优先级是不是不合理？**
 > 设计上是有意的。精确实体短路永远在最前面，无论总开关开不开——逻辑上"含 P6 15000 这种具体值的 query 没必要改写"应该比"是否启 LLM 改写"更优先判定。如果总开关关了，命中实体也是走归一化+规则拆分，等价结果但走两次短路有点浪费——这是冗余（不是 bug），简化逻辑顺序的代价。可以接受。
 
+<a id="exact-entities-bypass"></a>
 ### 3.8 Query 决策树第一档：精确实体短路（exact-entities-bypass）
 
 #### 改造动机
@@ -873,6 +884,7 @@ SseEmitter 流式推给前端
 
 ---
 
+<a id="rewrite-model"></a>
 ## 五、改写 query 用的哪个模型
 
 ### 5.1 当前是默认 chat 模型
@@ -912,6 +924,7 @@ MultiQuestionRewriteService.rewriteWithSplit()
 
 `MultiQuestionRewriteService.rewriteWithSplit()` 没有用 `llmService.chat(request, modelId)` 这个重载去指定便宜的小模型。改写不需要深度推理能力，用本地 Ollama 跑 `qwen3:8b-fp16` 完全够，节省主链路配额和成本。改造一行：调 `llmService.chat(request, "qwen3-local")` 让改写走本地 ollama。
 
+<a id="coref-resolution"></a>
 ### 5.5 多轮对话与指代消解——怎么判断用户 Query 和上文有关联
 
 **不在意图识别里判断，在 Query 改写里处理**。两步串联：先改写消解指代，再意图识别分类。
@@ -973,6 +986,7 @@ messages.add(ChatMessage.user(question)); // 当前 query 放最后
 
 ---
 
+<a id="temperature"></a>
 ## 六、temperature 参数的作用
 
 ### 6.1 通俗解释

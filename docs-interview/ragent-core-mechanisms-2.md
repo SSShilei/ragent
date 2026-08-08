@@ -8,6 +8,7 @@
 
 `DefaultContextFormatter`（`DefaultContextFormatter.java:42`）是整个 RAG 管线的"最后一公里"——把检索结果格式化为 LLM 能理解的 Prompt 文本。
 
+<a id="context-three-branches"></a>
 ### 1.1 三层分支
 
 ```java
@@ -18,6 +19,7 @@ public String formatKbContext(List<NodeScore> kbIntents, Map<String, List<Retrie
 }
 ```
 
+<a id="context-single-intent"></a>
 ### 1.2 单意图（最常见情况）
 
 ```
@@ -59,6 +61,7 @@ kb-section          → {snippet_section}{doc_blocks}      ← 包裹整体 KB �
 | `renderDocBlock` | `kb-doc-block` 或 `kb-doc-block-untitled` | 每个文档的 chunk 组 |
 | `renderChunksGroupedByDoc` | (调用 renderDocBlock × N) | 按 docId 分组后的所有文档块 |
 
+<a id="context-doc-group"></a>
 ### 1.3 按文档分组 + 排序（"等价父文档"的实现）
 
 `renderChunksGroupedByDoc`（行 201）是父文档等价方案的核心：
@@ -134,8 +137,10 @@ rerankedByIntent.values().stream()
 
 ---
 
+<a id="rerank-details"></a>
 ## 二、Rerank 详解——为什么需要两轮排序
 
+<a id="bi-cross-encoder"></a>
 ### 2.1 Bi-encoder vs Cross-encoder
 
 | | 向量检索 (bi-encoder) | Rerank (cross-encoder) |
@@ -167,6 +172,7 @@ rerank:
 
 `RoutingRerankService` 跟 chat 一样的 fallback 机制：首选 default-model，失败切备选。
 
+<a id="rerank-attribution"></a>
 ### 2.4 归因日志
 
 `RerankPostProcessor.logAttribution` 在 rerank 前后对比各通道存活数量，日志示例：
@@ -188,6 +194,7 @@ interp：10+8-10=8 个 chunk 在两个通道都有，Rerank 偏语义所以向�
 
 Ragent 有两层限流：**SSE 全局并发限流**和**MinerU 解析限流**。
 
+<a id="chat-queue-limiter"></a>
 ### 3.1 ChatQueueLimiter——SSE 入口限流
 
 ```yaml
@@ -216,6 +223,7 @@ enqueue 内部:
 
 超限时前端收到 `REJECT` SSE 事件后显示"系统繁忙，请稍后再试"，且**这条对话仍被记录到会话历史**。
 
+<a id="fair-rate-limiter"></a>
 ### 3.2 FairDistributedRateLimiter——Redis 分布式公平队列
 
 #### 解决什么问题
@@ -364,6 +372,7 @@ mineru:
 
 ## 四、SSE 流式输出——从模型到前端
 
+<a id="sse-overall"></a>
 ### 4.1 整体链路
 
 ```
@@ -382,6 +391,7 @@ StreamChatPipeline.streamLLMResponse()
   SseEmitter 流式推给前端
 ```
 
+<a id="multi-model-fallback"></a>
 ### 4.2 多模型 Fallback
 
 `RoutingLLMService.streamChat`（`RoutingLLMService.java:102`）：
@@ -429,6 +439,7 @@ ai:
 
 首包超过 60s → 标记失败 + 切下一个模型。
 
+<a id="frontend-cancel"></a>
 ### 4.5 前端取消
 
 ```java

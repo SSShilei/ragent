@@ -4,6 +4,7 @@
 
 ---
 
+<a id="recall-troubleshoot"></a>
 ## 一、检索召回率低的排查路径
 
 ### 1.1 分层排查框架
@@ -109,6 +110,7 @@ WHERE (metadata->>'embedding_dim')::int != vector_dims(embedding);
 
 ---
 
+<a id="agent-state-machine"></a>
 ## 二、Agent 任务状态机设计
 
 Ragent 是 Pipeline 模式不含 Agent loop，但 PowerAgent（AgentFlow）有完整的 Plan-ReAct Agent。以下综合两个项目的设计实践：
@@ -183,6 +185,7 @@ ORDER BY priority, create_time;
 
 **Ragent 的情况**：Ragent 是 pipeline 模式不涉及 agent 状态机。但文档分块任务（`t_knowledge_document_chunk_log`）有类似机制：RocketMQ 消费失败会重试，任务表记录 status 从 PENDING → RUNNING → SUCCESS/FAILED，重启后未被消费的消息会被重新分发。
 
+<a id="avoid-duplicate-tools"></a>
 ### 2.3 避免工具重复执行
 
 **三层防护**：
@@ -240,6 +243,7 @@ Layer 3: DB 记录 — tool_call 执行前 INSERT with UNIQUE constraint on task
 
 ## 三、MCP 通信模型与安全性
 
+<a id="mcp-comm-flow"></a>
 ### 3.1 MCP 完整通信流程
 
 ```
@@ -270,6 +274,7 @@ MCP Client (Ragent)                    MCP Server
    客户端/服务端任意一方关闭 SSE
 ```
 
+<a id="mcp-vs-fc"></a>
 ### 3.2 vs Function Calling vs OpenAPI
 
 | | MCP | Function Calling | OpenAPI |
@@ -282,6 +287,7 @@ MCP Client (Ragent)                    MCP Server
 
 **核心差异**：MCP 是**工具发现 + 建立连接** 的协议——Server 启动后向 Client 推送自己的 tool 列表，Client 收到 list 后才知道 Server 能干什么。Function Calling 是你提前写好的函数，OpenAPI 是提前写好的 JSON Spec，而 MCP 是运行时动态发现。
 
+<a id="mcp-security"></a>
 ### 3.3 MCP 安全风险
 
 **风险矩阵**：
