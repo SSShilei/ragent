@@ -293,6 +293,7 @@ mineru:
   semaphore-name: rag:mineru:parse
   max-wait-seconds: 30
   lease-seconds: 900
+  cache-enabled: true  # 同一文件+同一解析参数命中 RustFS 缓存时跳过 MinerU API
 
 sa-token:
   token-name: Authorization

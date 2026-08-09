@@ -95,4 +95,12 @@ public class MinerUProperties {
      * MinerU 解析许可自动释放时间（秒），需大于 timeoutSeconds
      */
     private int leaseSeconds = 900;
+
+    /**
+     * 是否启用 RustFS 解析结果缓存，默认 false
+     * <p>
+     * 开启后同一文件（SHA-256）+ 同一解析参数命中缓存时跳过 MinerU API 调用，
+     * 仅当改分块参数（chunk_size/overlap）重新分块时生效；改 OCR/表格/公式参数会换缓存 key
+     */
+    private boolean cacheEnabled = false;
 }

@@ -17,10 +17,13 @@
 
 package com.nageoffer.ai.ragent.core.parser.mineru;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import com.nageoffer.ai.ragent.core.parser.DocumentParser;
 import com.nageoffer.ai.ragent.core.parser.ParserType;
 import com.nageoffer.ai.ragent.core.parser.model.ParsedDocument;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import com.nageoffer.ai.ragent.rag.config.RagStorageProperties;
+import com.nageoffer.ai.ragent.rag.core.storage.ObjectStorageClient;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RPermitExpirableSemaphore;
@@ -29,11 +32,14 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -84,17 +90,23 @@ public class MinerUDocumentParser implements DocumentParser {
     private final MinerUResultUnpacker resultUnpacker;
     private final MinerUProperties properties;
     private final RedissonClient redissonClient;
+    private final ObjectStorageClient storageClient;
+    private final RagStorageProperties storageProperties;
 
     public MinerUDocumentParser(MinerUClient minerUClient,
                                 MinerUPollingExecutor pollingExecutor,
                                 MinerUResultUnpacker resultUnpacker,
                                 MinerUProperties properties,
-                                RedissonClient redissonClient) {
+                                RedissonClient redissonClient,
+                                ObjectStorageClient storageClient,
+                                RagStorageProperties storageProperties) {
         this.minerUClient = minerUClient;
         this.pollingExecutor = pollingExecutor;
         this.resultUnpacker = resultUnpacker;
         this.properties = properties;
         this.redissonClient = redissonClient;
+        this.storageClient = storageClient;
+        this.storageProperties = storageProperties;
     }
 
     @PostConstruct
@@ -159,6 +171,24 @@ public class MinerUDocumentParser implements DocumentParser {
         // MinerU 靠 name 扩展名识别格式,缺文件名时按 mimeType 补全
         String uploadName = resolveUploadName(sourceFile, mimeType, documentId);
 
+        // 0. 检查 RustFS 解析缓存：同一文件+SHA-256 + 同一解析参数命中则跳过 MinerU API
+        if (properties.isCacheEnabled()) {
+            String cacheKey = buildCacheKey(content);
+            String bucket = storageProperties.getKbBucket();
+            try {
+                if (storageClient.objectExists(bucket, cacheKey)) {
+                    log.info("MinerU 缓存命中，跳过 API 调用 documentId={} cacheKey={}", documentId, cacheKey);
+                    byte[] zipBytes;
+                    try (InputStream is = storageClient.getObject(bucket, cacheKey)) {
+                        zipBytes = is.readAllBytes();
+                    }
+                    return unpackAndTag(zipBytes, sourceFile, documentId, "cached", "cached", mimeType);
+                }
+            } catch (Exception e) {
+                log.warn("MinerU 缓存读取失败，回退为 API 调用 documentId={} cacheKey={}", documentId, cacheKey, e);
+            }
+        }
+
         // 1. 申请上传链接(只提交元信息,不带 url)
         BatchSubmitRequest request = buildSubmitRequest(uploadName, documentId);
         BatchUploadTicket ticket = minerUClient.requestUpload(request);
@@ -189,17 +219,50 @@ public class MinerUDocumentParser implements DocumentParser {
         // 4. 下载 zip
         byte[] zipBytes = minerUClient.downloadZip(status.zipUrl());
 
-        // 5. 解包为 ParsedDocument
-        ParsedDocument parsed = resultUnpacker.unpack(zipBytes, sourceFile, documentId);
+        // 5. 异步写入 RustFS 缓存（不阻塞主流程，失败不影响解析成功）
+        if (properties.isCacheEnabled()) {
+            String cacheKey = buildCacheKey(content);
+            String bucket = storageProperties.getKbBucket();
+            byte[] zipToCache = zipBytes;
+            CompletableFuture.runAsync(() -> {
+                try {
+                    storageClient.reliablePut(bucket, cacheKey,
+                            new ByteArrayInputStream(zipToCache), zipToCache.length, "application/zip");
+                    log.info("MinerU 解析结果已缓存 cacheKey={} size={}", cacheKey, zipToCache.length);
+                } catch (Exception e) {
+                    log.warn("MinerU 缓存写入失败，不影响解析结果 cacheKey={}", cacheKey, e);
+                }
+            });
+        }
 
-        // 6. 注入 batchId + zipUrl 到 metadata,供 ParserNode/IngestionContext 持久化(排障 + 重试幂等)
+        return unpackAndTag(zipBytes, sourceFile, documentId, ticket.batchId(), status.zipUrl(), mimeType);
+    }
+
+    /**
+     * 解包 zip 并打 metadata 标签，与缓存命中路径复用
+     */
+    private ParsedDocument unpackAndTag(byte[] zipBytes, String sourceFile, String documentId,
+                                        String batchId, String zipUrl, String mimeType) {
+        ParsedDocument parsed = resultUnpacker.unpack(zipBytes, sourceFile, documentId);
         Map<String, Object> mergedMeta = new HashMap<>(parsed.metadata() == null ? Map.of() : parsed.metadata());
-        mergedMeta.put(META_BATCH_ID, ticket.batchId());
-        mergedMeta.put(META_ZIP_URL, status.zipUrl());
+        mergedMeta.put(META_BATCH_ID, batchId);
+        mergedMeta.put(META_ZIP_URL, zipUrl);
         mergedMeta.put("parser", getParserType());
         mergedMeta.put("mimeType", mimeType == null ? "" : mimeType);
-
         return ParsedDocument.of(parsed.blocks(), mergedMeta);
+    }
+
+    /**
+     * 构建 RustFS 缓存 key：_mineru_cache/{sha256-of-file}/{md5-of-params}.zip
+     * <p>
+     * 文件未变 + 解析参数未变 → 同一 key → 缓存命中。改 OCR/表格/公式/语言任一参数 → key 不同 → 重新解析
+     */
+    private String buildCacheKey(byte[] content) {
+        String fileHash = DigestUtil.sha256Hex(content);
+        String paramsFingerprint = properties.isEnableTable() + "|" + properties.isEnableFormula()
+                + "|" + properties.isOcr() + "|" + properties.getLanguage();
+        String paramsHash = DigestUtil.md5Hex(paramsFingerprint);
+        return "_mineru_cache/" + fileHash + "/" + paramsHash + ".zip";
     }
 
     /**
