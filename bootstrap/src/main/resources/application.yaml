@@ -146,6 +146,7 @@ rag:
           confidence-threshold: 0.6              # KB 意图最高分低于此值 → 走全局作用域
           single-intent-supplement-threshold: 0.8  # 仅单个 KB 意图且分数低于此值 → 走全局作用域兜底
           candidate-budget: 60                   # 全局作用域取数上限（单一旋钮）
+          min-similarity: 0.3                  # 最小余弦相似度；低于此值的 chunk 在 PG 层直接丢弃
       keyword:
         enabled: true
         mode: both

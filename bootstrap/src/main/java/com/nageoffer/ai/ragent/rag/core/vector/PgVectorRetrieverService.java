@@ -17,6 +17,7 @@
 
 package com.nageoffer.ai.ragent.rag.core.vector;
 
+import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.infra.embedding.EmbeddingService;
@@ -26,6 +27,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -36,6 +38,7 @@ public class PgVectorRetrieverService implements VectorRetrieverService {
 
     private final JdbcTemplate jdbcTemplate;
     private final EmbeddingService embeddingService;
+    private final SearchChannelProperties searchProperties;
 
     @Override
     public List<RetrievedChunk> retrieve(RetrieveRequest request) {
@@ -46,8 +49,8 @@ public class PgVectorRetrieverService implements VectorRetrieverService {
 
     @Override
     public List<RetrievedChunk> retrieveByVector(float[] vector, RetrieveRequest request) {
-        // 单库检索：按 collection_name 列过滤，走 btree 索引
-        return queryByCollections(vector, List.of(request.getCollectionName()), request.getTopK());
+        // 单库检索：意图定向，不设相似度阈值（定向已天然过滤）
+        return queryByCollections(vector, List.of(request.getCollectionName()), request.getTopK(), 0.0);
     }
 
     @Override
@@ -62,31 +65,50 @@ public class PgVectorRetrieverService implements VectorRetrieverService {
         }
         List<Float> embedding = embeddingService.embed(query);
         float[] vector = normalize(toArray(embedding));
-        // 全局检索：单条 SQL 在多库范围内做带总预算的 TopN 召回，替代逐库 fan-out
-        return queryByCollections(vector, collectionNames, candidateBudget);
+        // 全局检索：加相似度阈值过滤低相关 chunk，减少 Rerank 成本与 Prompt 噪声
+        double minSimilarity = searchProperties.getChannels().getVector().getGlobal().getMinSimilarity();
+        List<RetrievedChunk> results = queryByCollections(vector, collectionNames, candidateBudget, minSimilarity);
+        log.info("PG 向量全局检索完成 candidateBudget={} minSimilarity={} 结果数={}", candidateBudget, minSimilarity, results.size());
+        return results;
     }
 
     /**
      * 在指定 collection 范围内执行一次向量相似度检索
      * <p>
-     * 单库与全局共用此方法：单库传单元素列表，全局传多元素列表
+     * 单库与全局共用此方法：单库传单元素列表，全局传多元素列表。
+     * minSimilarity > 0 时过滤低相似度 chunk，全局检索默认 0.3，意图定向传 0（不设阈）。
      */
-    private List<RetrievedChunk> queryByCollections(float[] vector, List<String> collectionNames, int limit) {
+    private List<RetrievedChunk> queryByCollections(float[] vector, List<String> collectionNames, int limit, double minSimilarity) {
         applyPgVectorHints();
 
         String vectorLiteral = toVectorLiteral(vector);
-        String placeholders = collectionNames.stream().map(c -> "?").collect(java.util.stream.Collectors.joining(", "));
+        String inPlaceholders = collectionNames.stream().map(c -> "?").collect(java.util.stream.Collectors.joining(", "));
 
-        Object[] args = new Object[collectionNames.size() + 3];
-        args[0] = vectorLiteral;
-        for (int i = 0; i < collectionNames.size(); i++) {
-            args[i + 1] = collectionNames.get(i);
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT id, content, 1 - (embedding <=> ?::vector) AS score FROM t_knowledge_vector WHERE collection_name IN (")
+           .append(inPlaceholders).append(")");
+
+        List<Object> argsList = new ArrayList<>();
+        argsList.add(vectorLiteral);
+        for (String collectionName : collectionNames) {
+            argsList.add(collectionName);
         }
-        args[collectionNames.size() + 1] = vectorLiteral;
-        args[collectionNames.size() + 2] = limit;
+
+        // 相似度阈值：在 PG 层提前过滤低相关 chunk，减少 Rerank 候选量与 Prompt 噪声
+        if (minSimilarity > 0.0) {
+            sql.append(" AND 1 - (embedding <=> ?::vector) >= ?");
+            argsList.add(vectorLiteral);
+            argsList.add(minSimilarity);
+        }
+
+        sql.append(" ORDER BY embedding <=> ?::vector LIMIT ?");
+        argsList.add(vectorLiteral);
+        argsList.add(limit);
+
+        Object[] args = argsList.toArray();
 
         // noinspection SqlDialectInspection,SqlNoDataSourceInspection
-        return jdbcTemplate.query("SELECT id, content, 1 - (embedding <=> ?::vector) AS score FROM t_knowledge_vector WHERE collection_name IN (" + placeholders + ") ORDER BY embedding <=> ?::vector LIMIT ?",
+        return jdbcTemplate.query(sql.toString(),
                 (rs, rowNum) -> RetrievedChunk.builder()
                         .id(rs.getString("id"))
                         .text(rs.getString("content"))

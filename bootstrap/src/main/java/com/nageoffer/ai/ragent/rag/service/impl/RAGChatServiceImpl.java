@@ -49,10 +49,16 @@ public class RAGChatServiceImpl implements RAGChatService {
 
     @Override
     public void streamChat(String question, String conversationId, Boolean deepThinking, SseEmitter emitter) {
+        // 1. 会话 ID 兜底（空就生成新雪花 ID）
         String actualConversationId = StrUtil.isBlank(conversationId) ? IdUtil.getSnowflakeNextIdStr() : conversationId;
+
+        // 2. 任务 ID（用于前端"停止"操作）
         String taskId = IdUtil.getSnowflakeNextIdStr();
+
+        // 3. 构造 SSE 回调（定义如何把流推给前端）
         StreamCallback callback = callbackFactory.createChatEventHandler(emitter, actualConversationId, taskId);
 
+        // 4. 限流排队 + 链路追踪 + 实际执行
         chatQueueLimiter.enqueue(question, actualConversationId, emitter,
                 () -> traceRunner.run(question, actualConversationId, taskId, callback, traceAware -> {
                     StreamChatContext ctx = StreamChatContext.builder()

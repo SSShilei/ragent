@@ -129,6 +129,13 @@ public class SearchChannelProperties {
         private int candidateBudget = 100;
 
         /**
+         * 全局检索最小余弦相似度阈值
+         * 低于此分数的 chunk 在 PG 层直接丢弃，不进 Rerank，减少交叉编码成本与 Prompt 噪声。
+         * 默认 0.3（cosine 距离）；<=0 时不做过滤，全量送入下游
+         */
+        private double minSimilarity = 0.3;
+
+        /**
          * 解析全局检索候选预算
          * 优先使用绝对预算 candidateBudget；未配置（<=0）时回退到 topK
          */
