@@ -87,6 +87,17 @@ class CustomPlanner(PlanReActPlanner):
 
 ### **1\.3 ReAct 与传统 Chain 的区别**
 
+| 维度 | 传统 Chain | ReAct |
+|:---|:---|:---|
+| 执行方式 | 预定义的线性步骤，一次跑完 | 思考→行动→观察 循环，动态调整 |
+| 纠错能力 | 无，中间步骤出错整条链废掉 | 有，REASONING 可识别错误并换策略 |
+| 工具调用 | 在固定位置调固定工具 | LLM 自主决定何时调、调什么、调几次 |
+| Token 消耗 | 低，单次调用 | 高，多轮循环叠加 |
+| 适用场景 | 简单问答、单步任务 | 复杂推理、多步分析、需要试错的场景 |
+| 可解释性 | 低，黑盒 | 高，每步 REASONING 可见 |
+
+**面试话术**：Chain 像流水线——原料进去，成品出来，中间不改道。ReAct 像工匠——边做边想，发现不对换工具重来。AgentFlow 的场景（策略分析、数据拉取→分析→生成→验证）天然是多步推理，所以必须用 ReAct。Ragent 的 FAQ 场景大部分一步检索就够了，所以选了管线而非 Agent loop。
+
 ### **1\.4 ADK Runner 的循环控制**
 
 ```Python
@@ -408,6 +419,17 @@ Content(role="user",          →    {"role": "tool",
 
 ### **5\.2 Python 端裁剪 vs Java 端截断**
 
+| 维度 | Python 端 (ADKExecutor) | Java 端 (ChatContextFilter) |
+|:---|:---|:---|
+| 触发时机 | 每次 LLM 调用前 | WorkFlow 中 chatNode 执行时 |
+| 裁剪单位 | 按 user 消息为边界的"完整轮次" | 按 JTokkit 精确 token 数 |
+| 裁剪方向 | 从旧到新，丢弃最早的消息 | 从旧到新，逐个移除配对的 Human+AI |
+| 保留策略 | 保留最近 N 轮 (默认 4 轮) | 保留不超过 maxTokens 的最近消息 |
+| 工具调用保护 | 以 user 分界，不拆散 tool call 原子组 | 移除 Human 时同时移除配对的 AI 回复 |
+| 超限处理 | 裁剪后仍超长 → 交给 LLM 自身截断 | 裁剪后仍超长 → 触发摘要 或 抛异常 CHAT_OVER_TOKEN_LIMIT |
+
+**面试关键点**：两端分工不同——Python 端管 Agent 推理的对话窗口，Java 端管 WorkFlow 节点的上下文预算。Python 端粗粒度（按轮次），Java 端细粒度（按 token）。两层保护确保不管哪条路径，上下文都不会无限膨胀。
+
 ### **5\.3 快速路径优化**
 
 ```Java
@@ -571,6 +593,16 @@ Content[] = [
 ```
 
 ### **7\.3 三种上下文模式的对比**
+
+| 维度 | 完全共享 | 完全隔离 | 本项目 (独立+State共享) |
+|:---|:---|:---|:---|
+| 对话历史 | 所有 Agent 共享同一份 | 每个 Agent 独立 | 子 Agent 推理独立，最终回复统一存储 |
+| 工具调用 | 互相可见，易污染 | 完全隔离，干净但无协作 | 子 Agent 工具调用对父 Agent 不可见 |
+| 数据传递 | 直接读对话历史 | 无，需显式传递 | State 字典 (state\_delta) + Memory 全局 |
+| 上下文长度 | 随 Agent 数量线性增长 | 每个 Agent 可控 | 父 Agent 不被子 Agent 中间推理撑爆 |
+| 适用场景 | 简单协作、角色扮演 | 独立任务、安全隔离 | 有主从关系的多 Agent 协作 |
+
+**面试话术**：我们的选择是在隔离和共享之间取平衡。子 Agent 推理过程对父 Agent 不可见——避免把 strategy\_agent 内部的 5 轮 ReAct 全塞进父 Agent 的上下文。但关键数据（request\_params、metadata）通过 State 透传，长期记忆通过 Memory 全局可读。这比"全共享"更省 token，比"全隔离"更易协作。
 
 ### **7\.4 本项目的具体实现**
 
@@ -843,7 +875,7 @@ text += f"\n【背景知识】{rag_results}"
 # 3. PlanReAct 指令 → 帮 LLM 理解任务分解
 # "制定计划→执行工具→推理→最终答案"
 
-# ★ Rewrite 是隐式的: LLM 在 REASONING 阶段自动做指代消解和问题改写 ★
+# ★ AgentFlow 没有独立 Rewrite 步骤。指代消解和问题改写由 LLM 在 PlanReAct 的 REASONING 阶段隐式完成 ★
 # 例如:
 # 用户: "那个电池参数再查一下"  ← 指代不明确
 # LLM REASONING: "用户之前查询了产品A，'那个'指产品A，需要用产品A的电池参数重新检索"
@@ -851,7 +883,7 @@ text += f"\n【背景知识】{rag_results}"
 
 **面试话术**:
 
-> 我们有两层意图识别：第一层是显式分支（代码判断明确业务场景，如检查策略发布状态），第二层是 Prompt 驱动的 LLM 路由（通过 `transfer_to_agent` 分发给 5 个子 Agent）。Rewrite 是隐式的——通过长期记忆和背景知识注入到 Prompt，让 LLM 在 ReAct 的 REASONING 阶段自动完成指代消解和问题改写。
+> 我们有两层意图识别：第一层是显式分支（代码判断明确业务场景，如检查策略发布状态），第二层是 Prompt 驱动的 LLM 路由（通过 `transfer_to_agent` 分发给 5 个子 Agent）。AgentFlow 没有独立的 Rewrite 步骤（与 Ragent 不同）。指代消解和问题改写依赖 Agent 自身的推理能力——通过长期记忆和背景知识注入到 Prompt，让 LLM 在 PlanReAct 的 REASONING 阶段自动完成。
 > 
 > 
 
@@ -1212,6 +1244,16 @@ function_call(run_python_code, {
 
 ### **Code\-RAG vs Code\-Generation 的区别**
 
+| 维度 | Code-RAG (检索增强) | Code-Generation (直接生成) |
+|:---|:---|:---|
+| 原理 | 从代码库检索已有代码片段，适配/复用 | LLM 从零生成代码 |
+| 准确度 | 高，基于已验证的存量代码 | 中，可能产生幻觉 API/语法错误 |
+| 实时性 | 依赖代码库质量和索引覆盖 | 无依赖，任何问题都能生成 |
+| 维护成本 | 需维护代码索引 + 定期更新 | 无 |
+| 适用场景 | 企业内部库调用、SQL 模板、固定模式代码 | 算法实现、新功能开发、一次性脚本 |
+
+**本项目的定位**：当前 `code_runner` 是 Code-Generation 模式——Agent 生成 Python 代码在沙箱执行。如果扩展 Code-RAG，会在 ES 中索引代码片段（code + docstring + language），Agent 先检索再生成，提高企业内部 API 调用的准确率。
+
 ### **如果要扩展 Code\-RAG**
 
 ```Plain Text
@@ -1411,13 +1453,37 @@ merge/rrfRank → reRanker → filterTokens → filterDisEnabledDatasets
 
 ## **五、工程能力对比**
 
+| 维度 | Ragent | AgentFlow |
+|:---|:---|:---|
+| 可观测性 | 自定义 Trace (@RagTraceNode AOP + TTL)，无 Actuator/Micrometer | Langfuse (LLM 调用) + Pinpoint (全链路) + Prometheus (指标) |
+| 模型容错 | 手写三态断路器 ModelHealthStore + 多候选 fallback + 60s 首包探测 | Sentinel 依赖已引入，实际未启用熔断；依赖 LLM 调用层重试 |
+| 限流 | FairDistributedRateLimiter (Redisson ZSet 公平队列 + Lua 原子抢占) | 无分布式限流；单节点 executeWithTimeout 超时控制 |
+| 会话恢复 | DB 持久化消息，摘要滚动压缩 | Redis Session + Mem0 长期记忆 |
+| 部署架构 | Java 单体四模块 | Java (agentflow + dataflow) + Python (af-rag-server) 三服务 |
+| 流式取消 | StreamTaskManager 跨节点 Redis 广播取消 | 无跨节点取消机制 |
+| 幂等 | @IdempotentSubmit + @IdempotentConsume 双切面 | 无声明式幂等 |
+
 ---
 
 ## **六、各自优势总结**
 
 ### **AgentFlow 比 Ragent 强的地方**
 
+1. **Agent 推理能力**：PlanReAct 循环 + 多 Agent 协作，Ragent 是确定性管线，无法做多步推理
+2. **可观测性**：Langfuse + Pinpoint + Prometheus 三层监控全覆盖，Ragent 缺标准指标暴露
+3. **平台化**：50+ 节点类型的可视化 DAG 引擎，低代码可配置，Ragent 是代码级管线
+4. **长期记忆**：Mem0 向量化语义检索，比 Ragent 的渐进式摘要更灵活，支持个性化
+5. **代码沙箱**：Python 代码执行插件，Agent 可自主生成并执行代码
+
 ### **Ragent 比 AgentFlow 强的地方**
+
+1. **Query Rewrite**：独立的术语归一化 + LLM 改写拆分 + Multi-Query 变体，AgentFlow 无独立 Rewrite 步骤
+2. **意图树**：LLM 细粒度叶子节点打分 + 三层意图路由（DOMAIN→CATEGORY→TOPIC），AgentFlow 只有粗粒度的 5 子 Agent 分发
+3. **Chunking 质量**：Block 体系 + 6 种 Block 类型感知切分 + 表格 key-value 渲染 + ChunkPacker 合并，AgentFlow 是参数可配的 TokenTextSplitter
+4. **检索通道**：4 通道并行（意图定向+关键词+向量全局+联网搜索），AgentFlow 只有 ES 双引擎
+5. **后处理链**：去重→RRF→Rerank→元数据富化 责任链模式，AgentFlow 无独立 MetadataEnrichment
+6. **稳定性基础设施**：分布式限流 + 流式取消 + 模型断路器 + 幂等双切面，AgentFlow 都弱于或缺失
+7. **单体架构**：无跨语言 HTTP 调用开销，部署运维简单
 
 ---
 
@@ -1844,6 +1910,18 @@ default Map<String, Object> executeWithTimeout(DispatchData data) {
 
 ### **核心对比**
 
+| 维度 | AgentFlow WorkFlow | Dify |
+|:---|:---|:---|
+| 执行模型 | JVM 内存内递归执行 | Celery 分布式 Task 队列 |
+| 数据传递 | FlowContext 对象直接引用，零序列化 | Redis 序列化/反序列化 |
+| 延迟 | 极低 (内存传递) | 较高 (每步网络+序列化) |
+| 水平扩展 | 单 JVM 限制，多实例无状态 | 天然水平扩展，Worker 可加 |
+| 容错 | 进程崩溃状态全丢 | Task 状态持久化，Worker 挂了可接手 |
+| 插件模型 | 插件即子 Workflow，递归调用引擎 | Python 函数，单一职责 |
+| 节点类型 | 50+ 预置节点 (chatNode/datasetSearch/tfSwitch...) | Python Tool + LLM Chain |
+| 开发门槛 | 低代码，拖拽配置 | 需写 Python 代码 |
+| 适合团队 | 有业务人员参与，快速搭建 AI 应用 | 开发者主导，灵活定制 |
+
 ### **关键差异**
 
 #### **差异一：执行模型——内存 vs 分布式**
@@ -1865,6 +1943,20 @@ default Map<String, Object> executeWithTimeout(DispatchData data) {
 **Dify**: Celery Task 状态持久化到 Redis/DB，Worker 挂了其他 Worker 可以接手。
 
 ### **适合什么场景**
+
+**选 AgentFlow WorkFlow 的场景**：
+- 低延迟实时 AI 对话（< 5s 完成）
+- 复杂编排（插件嵌套、多分支条件）
+- 业务人员参与配置（拖拽画布，无需写代码）
+- 企业内部快速搭建 AI 流水线
+
+**选 Dify 的场景**：
+- 高并发、长运行时间的批量处理
+- 需要严格的故障恢复（节点崩溃不丢状态）
+- 开源社区生态 + 丰富的第三方集成
+- 团队有 Python 开发能力，需要深度定制
+
+**一句话**：AgentFlow 重"快编排"，Dify 重"稳执行"。
 
 ### **面试怎么讲**
 
@@ -1895,6 +1987,18 @@ default Map<String, Object> executeWithTimeout(DispatchData data) {
 ```
 
 ### **DataFlow vs Dify Celery**
+
+| 维度 | DataFlow | Dify Celery |
+|:---|:---|:---|
+| 调度方式 | 数据库轮询 (每 30s) | 消息队列驱动 (即时) |
+| 中间件依赖 | 仅 MySQL + Redis 分布式锁 | RabbitMQ/Redis + Celery Beat |
+| 状态管理 | 两层状态机 (Context + Node)，状态即数据库记录 | Celery Task 状态 (PENDING/STARTED/SUCCESS/FAILURE) |
+| 重试策略 | 指数退避 (2^retryNum 分钟)，最多 3 次 | Celery 内置 retry + countdown |
+| 大文件处理 | Argo K8s Pod 分流 (>= 200MB) | 无内置大文件分流，需自行处理 |
+| 任务编排 | 用户定义 DAG 节点拓扑，支持分支/并行 | Celery Chain/Chord/Group 原语 |
+| 运维复杂度 | 低——无额外消息队列，状态即数据库 | 中——需维护 Celery Worker + Broker |
+
+**面试话术**：DataFlow 和 Dify Celery 的核心分歧是"pull vs push"。DataFlow 选择 pull（数据库轮询）是为了简化运维——不引入额外消息队列，状态和任务在同一张表中天然一致。Dify 选择 push（MQ 驱动）是为了实时性和分布式扩展。DataFlow 的代价是 30s 轮询间隙，但通过分段调度和 Argo 分流弥补了吞吐。
 
 ### **DataFlow 独特设计**
 
@@ -2029,5 +2133,18 @@ cnode_02 执行完成 (1s)
 
 ### **总结：这是取舍，不是错误**
 
+上面 8 个问题，每一个都是"场景驱动的设计取舍"：
 
+| 问题 | 取舍 |
+|:---|:---|
+| WorkFlow 内存执行 | 低延迟 vs 容错性——实时对话不能等 Redis 序列化 |
+| 意图路由粗粒度 | 5 个 Agent 够用 vs FAQ 精度——AgentFlow 不是 FAQ 系统 |
+| DataFlow 30s 轮询 | 运维简单 vs 实时性——不引入 MQ，状态即数据库 |
+| Java↔Python HTTP | 各取所长 vs 性能开销——Python 做 AI，Java 做编排 |
+| 无模型熔断 | 开发节奏取舍——Sentinel 已引入，排期中 |
+| 工具调用同步阻塞 | 简单可靠 vs 长任务体验——异步回调排期中 |
+| RRF k 值固定 | 够用 vs 极致调优——默认 k=60 对绝大多数场景效果好 |
+| 两套记忆存储 | Mem0 语义检索 vs 渐进式摘要——AgentFlow 更看重个性化记忆 |
+
+**面试时这样讲**：AgentFlow 的每个"缺点"背后都是一个有意识的工程决策。如果换一个场景（比如做高并发 FAQ），这些决策可能需要调整——这也是为什么我们保留了 Ragent 作为参考。关键不是没有缺点，而是知道为什么这样选，以及什么情况下会改。
 
