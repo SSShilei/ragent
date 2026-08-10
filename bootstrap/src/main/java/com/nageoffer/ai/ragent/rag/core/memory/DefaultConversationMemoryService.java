@@ -67,8 +67,8 @@ public class DefaultConversationMemoryService implements ConversationMemoryServi
                     .thenApply(v -> {
                         ChatMessage summary = summaryFuture.join();
                         List<ChatMessage> history = historyFuture.join();
-                        log.debug("加载对话记忆 - conversationId: {}, userId: {}, 摘要: {}, 历史消息数: {}, 耗时: {}ms",
-                                conversationId, userId, summary != null, history.size(), System.currentTimeMillis() - startTime);
+                        log.info("Memory loaded, conversationId={}, hasSummary={}, historySize={}, elapsed={}ms",
+                                conversationId, summary != null, history.size(), System.currentTimeMillis() - startTime);
                         return attachSummary(summary, history);
                     })
                     .join();

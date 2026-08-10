@@ -25,6 +25,7 @@ import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -37,6 +38,7 @@ import java.util.stream.IntStream;
 
 import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CONTEXT_FORMAT_PATH;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DefaultContextFormatter implements ContextFormatter {
@@ -45,16 +47,23 @@ public class DefaultContextFormatter implements ContextFormatter {
 
     @Override
     public String formatKbContext(List<NodeScore> kbIntents, Map<String, List<RetrievedChunk>> rerankedByIntent, int topK) {
+        long start = System.currentTimeMillis();
+        String result;
         if (rerankedByIntent == null || rerankedByIntent.isEmpty()) {
-            return "";
+            result = "";
+        } else if (CollUtil.isEmpty(kbIntents)) {
+            result = formatChunksWithoutIntent(rerankedByIntent, topK);
+        } else if (kbIntents.size() > 1) {
+            result = formatMultiIntentContext(kbIntents, rerankedByIntent, topK);
+        } else {
+            result = formatSingleIntentContext(kbIntents.get(0), rerankedByIntent, topK);
         }
-        if (CollUtil.isEmpty(kbIntents)) {
-            return formatChunksWithoutIntent(rerankedByIntent, topK);
-        }
-        if (kbIntents.size() > 1) {
-            return formatMultiIntentContext(kbIntents, rerankedByIntent, topK);
-        }
-        return formatSingleIntentContext(kbIntents.get(0), rerankedByIntent, topK);
+        int chunkCount = rerankedByIntent == null ? 0
+                : rerankedByIntent.values().stream().mapToInt(List::size).sum();
+        log.info("KB context formatted, intentCount={}, chunkCount={}, outputChars={}, elapsed={}ms",
+                kbIntents == null ? 0 : kbIntents.size(), chunkCount, result.length(),
+                System.currentTimeMillis() - start);
+        return result;
     }
 
     /**
@@ -136,44 +145,49 @@ public class DefaultContextFormatter implements ContextFormatter {
     @Override
     public String formatMcpContext(Map<String, List<CallToolResult>> toolResults,
                                    List<NodeScore> mcpIntents) {
+        long start = System.currentTimeMillis();
+        String result;
         if (CollUtil.isEmpty(toolResults)) {
-            return "";
-        }
-        if (CollUtil.isEmpty(mcpIntents)) {
-            return mergeAllResultsToText(toolResults);
-        }
-
-        Map<String, IntentNode> toolToIntent = new LinkedHashMap<>();
-        for (NodeScore ns : mcpIntents) {
-            IntentNode node = ns.getNode();
-            if (node == null || StrUtil.isBlank(node.getMcpToolId())) {
-                continue;
+            result = "";
+        } else if (CollUtil.isEmpty(mcpIntents)) {
+            result = mergeAllResultsToText(toolResults);
+        } else {
+            Map<String, IntentNode> toolToIntent = new LinkedHashMap<>();
+            for (NodeScore ns : mcpIntents) {
+                IntentNode node = ns.getNode();
+                if (node == null || StrUtil.isBlank(node.getMcpToolId())) {
+                    continue;
+                }
+                toolToIntent.putIfAbsent(node.getMcpToolId(), node);
             }
-            toolToIntent.putIfAbsent(node.getMcpToolId(), node);
-        }
 
-        return toolToIntent.entrySet().stream()
-                .map(entry -> {
-                    List<CallToolResult> results = toolResults.get(entry.getKey());
-                    if (CollUtil.isEmpty(results)) {
-                        return "";
-                    }
-                    IntentNode node = entry.getValue();
-                    String snippet = StrUtil.emptyIfNull(node.getPromptSnippet()).trim();
-                    String body = mergeResultsToText(results);
-                    if (StrUtil.isBlank(body)) {
-                        return "";
-                    }
-                    String snippetSection = StrUtil.isNotBlank(snippet)
-                            ? templateLoader.renderSection(CONTEXT_FORMAT_PATH, "mcp-intent-rules", Map.of("rules", snippet))
-                            : "";
-                    return templateLoader.renderSection(CONTEXT_FORMAT_PATH, "mcp-section", Map.of(
-                            "snippet_section", snippetSection,
-                            "body", body
-                    ));
-                })
-                .filter(StrUtil::isNotBlank)
-                .collect(Collectors.joining("\n\n"));
+            result = toolToIntent.entrySet().stream()
+                    .map(entry -> {
+                        List<CallToolResult> results = toolResults.get(entry.getKey());
+                        if (CollUtil.isEmpty(results)) {
+                            return "";
+                        }
+                        IntentNode node = entry.getValue();
+                        String snippet = StrUtil.emptyIfNull(node.getPromptSnippet()).trim();
+                        String body = mergeResultsToText(results);
+                        if (StrUtil.isBlank(body)) {
+                            return "";
+                        }
+                        String snippetSection = StrUtil.isNotBlank(snippet)
+                                ? templateLoader.renderSection(CONTEXT_FORMAT_PATH, "mcp-intent-rules", Map.of("rules", snippet))
+                                : "";
+                        return templateLoader.renderSection(CONTEXT_FORMAT_PATH, "mcp-section", Map.of(
+                                "snippet_section", snippetSection,
+                                "body", body
+                        ));
+                    })
+                    .filter(StrUtil::isNotBlank)
+                    .collect(Collectors.joining("\n\n"));
+        }
+        log.info("MCP context formatted, toolCount={}, outputChars={}, elapsed={}ms",
+                toolResults == null ? 0 : toolResults.size(), result.length(),
+                System.currentTimeMillis() - start);
+        return result;
     }
 
     // ==================== 工具方法 ====================

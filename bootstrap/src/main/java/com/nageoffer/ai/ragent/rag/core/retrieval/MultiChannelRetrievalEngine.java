@@ -63,17 +63,24 @@ public class MultiChannelRetrievalEngine {
      */
     @RagTraceNode(name = "multi-channel-retrieval", type = "RETRIEVE_CHANNEL")
     public List<RetrievedChunk> retrieveKnowledgeChannels(List<SubQuestionIntent> subIntents, int topK) {
+        long start = System.currentTimeMillis();
         // 构建检索上下文
         SearchContext context = buildSearchContext(subIntents, topK);
+        log.info("Multi-channel retrieve start, subIntents={}, topK={}, question={}",
+                subIntents.size(), topK, context.getOriginalQuestion());
 
         // 【阶段1：多通道并行检索】
         List<SearchChannelResult> channelResults = executeSearchChannels(context);
         if (CollUtil.isEmpty(channelResults)) {
+            log.warn("Multi-channel retrieve no channel results, elapsed={}ms", System.currentTimeMillis() - start);
             return List.of();
         }
 
         // 【阶段2：后置处理器链】
-        return executePostProcessors(channelResults, context);
+        List<RetrievedChunk> finalChunks = executePostProcessors(channelResults, context);
+        log.info("Multi-channel retrieve finished, finalChunks={}, elapsed={}ms",
+                finalChunks.size(), System.currentTimeMillis() - start);
+        return finalChunks;
     }
 
     /**

@@ -74,62 +74,98 @@ public class StreamChatPipeline {
 
     /**
      * 执行流式对话管道
+     * <p>
+     * 编排 7 个阶段，其中 ④ 歧义引导、⑤ 纯闲聊、⑥ 检索空结果 三个短路点命中即终止，
+     * 否则走到 ⑦ Prompt 组装 + LLM 流式输出。每个阶段内部记录耗时与关键产出，便于慢链路排查
      */
     public void execute(StreamChatContext ctx) {
-        loadMemory(ctx);       // ① 记忆加载（并行内部）
-        rewriteQuery(ctx);     // ② Query 重写 + 拆分
+        long pipelineStart = System.currentTimeMillis();
+        log.info("Chat pipeline start, question={}, conversationId={}, taskId={}, deepThinking={}",
+                ctx.getQuestion(), ctx.getConversationId(), ctx.getTaskId(), ctx.isDeepThinking());
+
+        loadMemory(ctx);       // ① 记忆加载（并行摘要+历史）
+        rewriteQuery(ctx);     // ② Query 重写 + 多问句拆分
         resolveIntents(ctx);   // ③ 意图识别（基于 ② 的输出）
 
-        if (handleGuidance(ctx)) {
+        if (handleGuidance(ctx)) {        // ④ 歧义引导（短路点 1）
             return;
         }
-        if (handleSystemOnly(ctx)) {
-            return;
-        }
-
-        RetrievalContext retrievalCtx = retrieve(ctx);
-        if (handleEmptyRetrieval(ctx, retrievalCtx)) {
+        if (handleSystemOnly(ctx)) {      // ⑤ 纯闲聊短路（短路点 2）
             return;
         }
 
-        streamRagResponse(ctx, retrievalCtx);
+        RetrievalContext retrievalCtx = retrieve(ctx);                       // ⑥ 检索
+        if (handleEmptyRetrieval(ctx, retrievalCtx)) {                       // 检索空结果兜底（短路点 3）
+            return;
+        }
+
+        streamRagResponse(ctx, retrievalCtx);                                // ⑦ Prompt 组装 + LLM 流式输出
+        log.info("Chat pipeline end, scene=rag, elapsed={}ms", elapsed(pipelineStart));
     }
 
     // ==================== 流水线阶段 ====================
 
+    /**
+     * ① 记忆加载：并行加载历史摘要与消息，并把当前问题追加进上下文
+     */
     private void loadMemory(StreamChatContext ctx) {
+        long start = System.currentTimeMillis();
         List<ChatMessage> history = memoryService.loadAndAppend(
                 ctx.getConversationId(),
                 ctx.getUserId(),
                 ChatMessage.user(ctx.getQuestion())
         );
         ctx.setHistory(history);
+        log.info("Stage[1/7] loadMemory finished, historySize={}, elapsed={}ms", sizeOf(history), elapsed(start));
     }
 
+    /**
+     * ② Query 重写：LLM 改写 + 多问句拆分 + 可选 Multi-Query 变体
+     */
     private void rewriteQuery(StreamChatContext ctx) {
+        long start = System.currentTimeMillis();
         RewriteResult rewriteResult = queryRewriteService.rewriteWithSplit(ctx.getQuestion(), ctx.getHistory());
         ctx.setRewriteResult(rewriteResult);
+        log.info("Stage[2/7] rewriteQuery finished, rewritten={}, subQuestions={}, hasVariants={}, elapsed={}ms",
+                rewriteResult.rewrittenQuestion(), sizeOf(rewriteResult.subQuestions()),
+                rewriteResult.hasVariants(), elapsed(start));
     }
 
+    /**
+     * ③ 意图识别：并行对每个子问题做 LLM 叶子节点打分，过滤低分、截断 topN
+     */
     private void resolveIntents(StreamChatContext ctx) {
+        long start = System.currentTimeMillis();
         List<SubQuestionIntent> subIntents = intentResolver.resolve(ctx.getRewriteResult());
         ctx.setSubIntents(subIntents);
+        int intentHits = subIntents.stream().mapToInt(si -> sizeOf(si.nodeScores())).sum();
+        log.info("Stage[3/7] resolveIntents finished, subIntents={}, intentHits={}, elapsed={}ms",
+                subIntents.size(), intentHits, elapsed(start));
     }
 
+    /**
+     * ④ 歧义引导（短路点 1）：多 KB 意图得分接近时反问用户澄清，命中则不再检索
+     */
     private boolean handleGuidance(StreamChatContext ctx) {
+        long start = System.currentTimeMillis();
         GuidanceDecision decision = guidanceService.detectAmbiguity(
                 ctx.getRewriteResult().rewrittenQuestion(),
                 ctx.getSubIntents()
         );
         if (!decision.isPrompt()) {
+            log.info("Stage[4/7] handleGuidance skipped, no ambiguity, elapsed={}ms", elapsed(start));
             return false;
         }
         StreamCallback callback = ctx.getCallback();
         callback.onContent(decision.getPrompt());
         callback.onComplete();
+        log.info("Stage[4/7] handleGuidance triggered, ask user for clarification, elapsed={}ms", elapsed(start));
         return true;
     }
 
+    /**
+     * ⑤ 纯闲聊短路（短路点 2）：所有意图都是 SYSTEM 时直接 LLM 回答，跳过检索
+     */
     private boolean handleSystemOnly(StreamChatContext ctx) {
         List<SubQuestionIntent> subIntents = ctx.getSubIntents();
         boolean allSystemOnly = subIntents.stream()
@@ -150,13 +186,25 @@ public class StreamChatPipeline {
                 ctx.getCallback()
         );
         taskManager.bindHandle(ctx.getTaskId(), handle);
+        log.info("Stage[5/7] handleSystemOnly short-circuit, skip retrieval, customPromptApplied={}",
+                StrUtil.isNotBlank(customPrompt));
         return true;
     }
 
+    /**
+     * ⑥ 检索：KB 多通道检索 + MCP 工具执行，产出统一 RetrievalContext
+     */
     private RetrievalContext retrieve(StreamChatContext ctx) {
-        return retrievalEngine.retrieve(ctx.getSubIntents(), searchProperties.getDefaultTopK());
+        long start = System.currentTimeMillis();
+        RetrievalContext retrievalCtx = retrievalEngine.retrieve(ctx.getSubIntents(), searchProperties.getDefaultTopK());
+        log.info("Stage[6/7] retrieve finished, hasKb={}, hasMcp={}, elapsed={}ms",
+                retrievalCtx.hasKb(), retrievalCtx.hasMcp(), elapsed(start));
+        return retrievalCtx;
     }
 
+    /**
+     * 检索空结果兜底（短路点 3）：KB 与 MCP 都无上下文时直接提示未检索到内容
+     */
     private boolean handleEmptyRetrieval(StreamChatContext ctx, RetrievalContext retrievalCtx) {
         if (!retrievalCtx.isEmpty()) {
             return false;
@@ -164,10 +212,15 @@ public class StreamChatPipeline {
         StreamCallback callback = ctx.getCallback();
         callback.onContent("未检索到与问题相关的文档内容。");
         callback.onComplete();
+        log.info("Stage[6/7] empty retrieval, fallback response sent, question={}", ctx.getQuestion());
         return true;
     }
 
+    /**
+     * ⑦ Prompt 组装 + LLM 流式输出：聚合意图、构造 PromptContext，发出流式请求并绑定取消句柄
+     */
     private void streamRagResponse(StreamChatContext ctx, RetrievalContext retrievalCtx) {
+        long start = System.currentTimeMillis();
         // 聚合所有意图用于 prompt 规划
         IntentGroup mergedGroup = intentResolver.mergeIntentGroup(ctx.getSubIntents());
 
@@ -180,10 +233,15 @@ public class StreamChatPipeline {
                 ctx.getCallback()
         );
         taskManager.bindHandle(ctx.getTaskId(), handle);
+        log.info("Stage[7/7] RAG response streaming, mcpIntents={}, kbIntents={}, elapsed={}ms",
+                mergedGroup.mcpIntents().size(), mergedGroup.kbIntents().size(), elapsed(start));
     }
 
     // ==================== LLM 响应 ====================
 
+    /**
+     * 纯闲聊/系统响应的流式回答：走轻量 system prompt，不携带检索证据
+     */
     private StreamCancellationHandle streamSystemResponse(String question, List<ChatMessage> history,
                                                           String customPrompt, StreamCallback callback) {
         String systemPrompt = StrUtil.isNotBlank(customPrompt)
@@ -202,9 +260,14 @@ public class StreamChatPipeline {
                 .temperature(0.7D)
                 .thinking(false)
                 .build();
+        log.info("System response streaming, customPromptApplied={}, messages={}, temperature=0.7",
+                StrUtil.isNotBlank(customPrompt), messages.size());
         return llmService.streamChat(req, callback);
     }
 
+    /**
+     * RAG 响应的流式回答：按 KB/MCP/Mixed 场景选模板组装消息，发出 LLM 流式请求
+     */
     private StreamCancellationHandle streamLLMResponse(RewriteResult rewriteResult, RetrievalContext ctx,
                                                        IntentGroup intentGroup, List<ChatMessage> history,
                                                        boolean deepThinking, StreamCallback callback) {
@@ -230,6 +293,17 @@ public class StreamChatPipeline {
                 .topP(ctx.hasMcp() ? 0.8D : 1D)
                 .build();
 
+        log.info("RAG LLM request built, scene={}, messages={}, temperature={}, topP={}, thinking={}",
+                ctx.hasMcp() ? "MCP" : "KB", messages.size(),
+                chatRequest.getTemperature(), chatRequest.getTopP(), deepThinking);
         return llmService.streamChat(chatRequest, callback);
+    }
+
+    private long elapsed(long start) {
+        return System.currentTimeMillis() - start;
+    }
+
+    private static int sizeOf(List<?> list) {
+        return list == null ? 0 : list.size();
     }
 }

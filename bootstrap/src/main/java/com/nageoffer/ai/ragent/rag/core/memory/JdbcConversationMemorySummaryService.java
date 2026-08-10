@@ -101,17 +101,21 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
         int triggerTurns = memoryProperties.getSummaryStartTurns();
         int maxTurns = memoryProperties.getHistoryKeepTurns();
         if (maxTurns <= 0 || triggerTurns <= 0) {
+            log.warn("Summary compress disabled, triggerTurns={}, maxTurns={}", triggerTurns, maxTurns);
             return;
         }
 
         String lockKey = SUMMARY_LOCK_PREFIX + buildLockKey(conversationId, userId);
         RLock lock = redissonClient.getLock(lockKey);
         if (!lock.tryLock()) {
+            log.info("Summary compress skip, lock not acquired, conversationId={}, userId={}", conversationId, userId);
             return;
         }
         try {
             long total = conversationGroupService.countUserMessages(conversationId, userId);
             if (total < triggerTurns) {
+                log.info("Summary compress skip, totalTurns={} < triggerTurns={}, elapsed={}ms",
+                        total, triggerTurns, System.currentTimeMillis() - startTime);
                 return;
             }
 
@@ -122,21 +126,29 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
                     maxTurns
             );
             if (latestUserTurns.isEmpty()) {
+                log.info("Summary compress skip, no user turns in window, elapsed={}ms",
+                        System.currentTimeMillis() - startTime);
                 return;
             }
             String historyStartId = resolveHistoryStartId(latestUserTurns);
             if (StrUtil.isBlank(historyStartId)) {
+                log.info("Summary compress skip, historyStartId is blank, elapsed={}ms",
+                        System.currentTimeMillis() - startTime);
                 return;
             }
 
             String afterId = resolveSummaryStartId(conversationId, userId, latestSummary);
             if (afterId != null && Long.parseLong(afterId) >= Long.parseLong(historyStartId)) {
+                log.info("Summary compress skip, summary already covers history window, elapsed={}ms",
+                        System.currentTimeMillis() - startTime);
                 return;
             }
 
             // 摘要覆盖约一半原文窗口；只有这段重叠滑出窗口后才再次生成摘要
             String summaryCutoffId = resolveSummaryCutoffId(latestUserTurns);
             if (StrUtil.isBlank(summaryCutoffId)) {
+                log.info("Summary compress skip, summaryCutoffId is blank, elapsed={}ms",
+                        System.currentTimeMillis() - startTime);
                 return;
             }
 
@@ -147,26 +159,32 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
                     summaryCutoffId
             );
             if (CollUtil.isEmpty(toSummarize)) {
+                log.info("Summary compress skip, no messages in summary window, elapsed={}ms",
+                        System.currentTimeMillis() - startTime);
                 return;
             }
 
             String lastMessageId = resolveLastMessageId(toSummarize);
             if (StrUtil.isBlank(lastMessageId)) {
+                log.info("Summary compress skip, lastMessageId is blank, elapsed={}ms",
+                        System.currentTimeMillis() - startTime);
                 return;
             }
 
             String existingSummary = latestSummary == null ? "" : latestSummary.getContent();
             String summary = summarizeMessages(toSummarize, existingSummary);
             if (StrUtil.isBlank(summary)) {
+                log.info("Summary compress skip, generated summary is blank, elapsed={}ms",
+                        System.currentTimeMillis() - startTime);
                 return;
             }
 
             createSummary(conversationId, userId, summary, lastMessageId);
-            log.info("摘要成功 - conversationId：{}，userId：{}，消息数：{}，耗时：{}ms",
+            log.info("Summary compress succeeded, conversationId={}, userId={}, summarizedTurns={}, elapsed={}ms",
                     conversationId, userId, toSummarize.size(),
                     System.currentTimeMillis() - startTime);
         } catch (Exception e) {
-            log.error("摘要失败 - conversationId：{}，userId：{}", conversationId, userId, e);
+            log.error("Summary compress failed - conversationId：{}，userId：{}", conversationId, userId, e);
         } finally {
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();

@@ -76,13 +76,16 @@ public class RetrievalEngine {
      */
     @RagTraceNode(name = "retrieval-engine", type = "RETRIEVE")
     public RetrievalContext retrieve(List<SubQuestionIntent> subIntents, int topK) {
+        long start = System.currentTimeMillis();
         if (CollUtil.isEmpty(subIntents)) {
+            log.warn("RetrievalEngine skipped, subIntents is empty");
             return RetrievalContext.builder()
                     .intentChunks(Map.of())
                     .build();
         }
 
         int finalTopK = topK > 0 ? topK : searchProperties.getDefaultTopK();
+        log.info("RetrievalEngine start, subIntents={}, topK={}", subIntents.size(), finalTopK);
         List<CompletableFuture<SubQuestionContext>> tasks = subIntents.stream()
                 .map(si -> CompletableFuture.supplyAsync(
                         () -> {
@@ -139,14 +142,21 @@ public class RetrievalEngine {
             mcpContext = mcpBuilder.toString().trim();
         }
 
-        return RetrievalContext.builder()
+        RetrievalContext result = RetrievalContext.builder()
                 .mcpContext(mcpContext)
                 .kbContext(kbContext)
                 .intentChunks(mergedIntentChunks)
                 .build();
+        log.info("RetrievalEngine finished, kbContextChars={}, mcpContextChars={}, elapsed={}ms",
+                kbContext.length(), mcpContext.length(), System.currentTimeMillis() - start);
+        return result;
     }
 
+    /**
+     * 构建单个子问题的检索上下文：KB 检索 + MCP 工具执行并行组织，产出该子问题的 KB/MCP 文本
+     */
     private SubQuestionContext buildSubQuestionContext(SubQuestionIntent intent, int topK) {
+        long start = System.currentTimeMillis();
         List<NodeScore> kbIntents = NodeScoreFilters.kb(intent.nodeScores());
         List<NodeScore> mcpIntents = NodeScoreFilters.mcp(intent.nodeScores());
 
@@ -156,6 +166,10 @@ public class RetrievalEngine {
                 ? executeMcpAndMerge(intent.subQuestion(), mcpIntents)
                 : "";
 
+        log.info("Sub-question context built, question={}, kbIntents={}, mcpIntents={}, kbChars={}, mcpChars={}, elapsed={}ms",
+                intent.subQuestion(), kbIntents.size(), mcpIntents.size(),
+                kbResult.groupedContext().length(), mcpContext.length(),
+                System.currentTimeMillis() - start);
         return new SubQuestionContext(intent.subQuestion(), kbResult.groupedContext(), mcpContext, kbResult.intentChunks());
     }
 
@@ -185,19 +199,26 @@ public class RetrievalEngine {
     }
 
     private String executeMcpAndMerge(String question, List<NodeScore> mcpIntents) {
+        long start = System.currentTimeMillis();
         if (CollUtil.isEmpty(mcpIntents)) {
             return "";
         }
 
         Map<String, List<CallToolResult>> toolResults = executeMcpTools(question, mcpIntents);
         if (toolResults.isEmpty()) {
+            log.info("MCP tools returned empty, tools={}, question={}, elapsed={}ms",
+                    mcpIntents.size(), question, System.currentTimeMillis() - start);
             return "";
         }
 
-        return contextFormatter.formatMcpContext(toolResults, mcpIntents);
+        String merged = contextFormatter.formatMcpContext(toolResults, mcpIntents);
+        log.info("MCP context merged, tools={}, resultChars={}, elapsed={}ms",
+                toolResults.size(), merged.length(), System.currentTimeMillis() - start);
+        return merged;
     }
 
     private KbResult retrieveAndRerank(SubQuestionIntent intent, List<NodeScore> kbIntents, int topK) {
+        long start = System.currentTimeMillis();
         // Multi-Query 变体：每个变体作为独立 query 并行检索
         List<String> variantQueries = intent.variantQueries();
         if (CollUtil.isNotEmpty(variantQueries) && variantQueries.size() > 1) {
@@ -209,12 +230,16 @@ public class RetrievalEngine {
         List<RetrievedChunk> chunks = multiChannelRetrievalEngine.retrieveKnowledgeChannels(subIntents, topK);
 
         if (CollUtil.isEmpty(chunks)) {
+            log.info("KB retrieveAndRerank empty result, question={}, elapsed={}ms",
+                    intent.subQuestion(), System.currentTimeMillis() - start);
             return KbResult.empty();
         }
 
         // 按意图节点分组（用于格式化上下文）
         Map<String, List<RetrievedChunk>> intentChunks = buildIntentChunks(chunks, kbIntents);
         String groupedContext = contextFormatter.formatKbContext(kbIntents, intentChunks, topK);
+        log.info("KB retrieveAndRerank finished, chunks={}, intentChunks={}, contextChars={}, elapsed={}ms",
+                chunks.size(), intentChunks.size(), groupedContext.length(), System.currentTimeMillis() - start);
         return new KbResult(groupedContext, intentChunks);
     }
 
@@ -223,6 +248,7 @@ public class RetrievalEngine {
      * 同一 chunk 在多个变体中命中 → 保留最高优先级通道版本（复用 Dedup 通道优先级）
      */
     private KbResult retrieveWithVariants(SubQuestionIntent intent, List<NodeScore> kbIntents, int topK, List<String> variants) {
+        long start = System.currentTimeMillis();
         // 每个变体并行检索
         List<CompletableFuture<List<RetrievedChunk>>> futures = variants.stream()
                 .map(variant -> CompletableFuture.supplyAsync(
@@ -241,6 +267,8 @@ public class RetrievalEngine {
                 .toList();
 
         if (variantResults.isEmpty()) {
+            log.info("Multi-variant retrieve empty result, variants={}, question={}, elapsed={}ms",
+                    variants.size(), intent.subQuestion(), System.currentTimeMillis() - start);
             return KbResult.empty();
         }
 
@@ -259,6 +287,9 @@ public class RetrievalEngine {
         List<RetrievedChunk> dedupChunks = new ArrayList<>(merged.values());
         Map<String, List<RetrievedChunk>> intentChunks = buildIntentChunks(dedupChunks, kbIntents);
         String groupedContext = contextFormatter.formatKbContext(kbIntents, intentChunks, topK);
+        log.info("Multi-variant retrieve finished, variants={}, hitVariants={}, mergedChunks={}, contextChars={}, elapsed={}ms",
+                variants.size(), variantResults.size(), dedupChunks.size(),
+                groupedContext.length(), System.currentTimeMillis() - start);
         return new KbResult(groupedContext, intentChunks);
     }
 
@@ -316,6 +347,7 @@ public class RetrievalEngine {
     }
 
     private CallToolResult executeSingleMcpTool(String question, IntentNode intentNode) {
+        long start = System.currentTimeMillis();
         String toolId = intentNode.getMcpToolId();
         Optional<McpToolExecutor> executorOpt = mcpToolRegistry.getExecutor(toolId);
         if (executorOpt.isEmpty()) {
@@ -329,7 +361,10 @@ public class RetrievalEngine {
         String customParamPrompt = intentNode.getParamPromptTemplate();
         Map<String, Object> params = mcpParameterExtractor.extractParameters(question, tool, customParamPrompt);
 
-        return executor.execute(params != null ? params : new HashMap<>());
+        CallToolResult result = executor.execute(params != null ? params : new HashMap<>());
+        log.info("MCP tool executed, toolId={}, params={}, isError={}, elapsed={}ms",
+                toolId, params, result.isError(), System.currentTimeMillis() - start);
+        return result;
     }
 
     private record ToolOutput(String toolId, CallToolResult result) {
