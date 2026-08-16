@@ -23,7 +23,9 @@ import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.convention.LLMResponse;
 import com.nageoffer.ai.ragent.framework.convention.ToolCall;
+import com.nageoffer.ai.ragent.framework.trace.RagTraceNode;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
+import com.nageoffer.ai.ragent.infra.token.TokenCounterService;
 import com.nageoffer.ai.ragent.rag.config.AgentProperties;
 import com.nageoffer.ai.ragent.rag.core.mcp.McpToolExecutor;
 import com.nageoffer.ai.ragent.rag.core.mcp.McpToolRegistry;
@@ -38,6 +40,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -68,6 +71,8 @@ public class AgentLoopExecutor {
     private final McpToolSchemaConverter schemaConverter;
     private final Executor mcpBatchExecutor;
     private final AgentProperties agentProperties;
+    private final AgentLoopCheckpointStore checkpointStore;
+    private final TokenCounterService tokenCounterService;
 
     /**
      * 执行 Agent 循环，返回最终文本回答
@@ -75,18 +80,42 @@ public class AgentLoopExecutor {
      * @param ctx 循环上下文（消息序列 + 工具清单）
      * @return 最终文本答案（循环超限或陷入重复时返回兜底提示）
      */
+    @RagTraceNode(name = "agent-loop", type = "AGENT_LOOP")
     public String run(AgentLoopContext ctx) {
+        return runWithMetadata(ctx).answer();
+    }
+
+    /**
+     * 执行 Agent 循环并返回带元数据的结果（评测与成本归因用）
+     *
+     * @param ctx 循环上下文
+     * @return 最终答案 + 实际工具调用 + 轮数 + Token 估算
+     */
+    @RagTraceNode(name = "agent-loop", type = "AGENT_LOOP")
+    public AgentLoopResult runWithMetadata(AgentLoopContext ctx) {
         List<ChatMessage> messages = new ArrayList<>(ctx.getMessages());
+        int round = 0;
+        List<String> actualToolCalls = new ArrayList<>();
+        long totalTokens = 0;
+
+        // 断点恢复：实例崩溃后从最近一轮继续，而非从头重来
+        Optional<AgentLoopCheckpoint> checkpoint = checkpointStore.load(ctx.getTaskId());
+        if (checkpoint.isPresent()) {
+            round = checkpoint.get().round();
+            messages = new ArrayList<>(checkpoint.get().messages());
+            log.info("Agent loop resumed from checkpoint, taskId={}, round={}", ctx.getTaskId(), round);
+        }
+
         List<Map<String, Object>> toolDeclarations = schemaConverter.convertTools(ctx.getTools());
         int maxLlmCalls = agentProperties.getMaxLlmCalls();
         int maxConsecutiveSameTool = agentProperties.getMaxConsecutiveSameTool();
 
-        int round = 0;
         String lastToolName = null;
         int consecutiveSameCall = 0;
 
         while (round < maxLlmCalls) {
             round++;
+            totalTokens += estimateTokens(messages);
             ChatRequest request = ChatRequest.builder()
                     .messages(messages)
                     .tools(toolDeclarations)
@@ -95,10 +124,15 @@ public class AgentLoopExecutor {
                     .build();
 
             LLMResponse response = llmService.chatWithTools(request);
+            totalTokens += estimateTokens(response.content());
 
             if (!response.hasToolCalls()) {
-                log.info("Agent loop finished, round={}, answerLength={}", round, StrUtil.length(response.content()));
-                return StrUtil.isBlank(response.content()) ? "" : response.content();
+                checkpointStore.clear(ctx.getTaskId());
+                log.info("Agent loop finished, round={}, answerLength={}, totalTokens={}",
+                        round, StrUtil.length(response.content()), totalTokens);
+                return new AgentLoopResult(
+                        StrUtil.isBlank(response.content()) ? "" : response.content(),
+                        actualToolCalls, round, totalTokens);
             }
 
             List<ToolCall> toolCalls = response.toolCalls();
@@ -109,11 +143,14 @@ public class AgentLoopExecutor {
 
             // 重复调用检测：连续调用同一工具视为死循环
             for (ToolCall tc : toolCalls) {
+                actualToolCalls.add(tc.name());
                 consecutiveSameCall = tc.name().equals(lastToolName) ? consecutiveSameCall + 1 : 1;
                 lastToolName = tc.name();
                 if (consecutiveSameCall >= maxConsecutiveSameTool) {
+                    checkpointStore.clear(ctx.getTaskId());
                     log.warn("Agent loop repeated same tool {} times, tool={}, abort", consecutiveSameCall, tc.name());
-                    return "工具调用似乎陷入循环，请换一种方式提问。";
+                    return new AgentLoopResult("工具调用似乎陷入循环，请换一种方式提问。",
+                            actualToolCalls, round, totalTokens);
                 }
             }
 
@@ -122,10 +159,14 @@ public class AgentLoopExecutor {
             for (ToolResult result : results) {
                 messages.add(ChatMessage.tool(result.toolCallId(), truncate(result.output())));
             }
+
+            // 每轮结束后保存断点，供实例崩溃后恢复
+            checkpointStore.save(ctx.getTaskId(), round, messages);
         }
 
-        log.warn("Agent loop exceeded max llm calls, max={}", maxLlmCalls);
-        return "处理步骤超过上限，请简化问题后重试。";
+        checkpointStore.clear(ctx.getTaskId());
+        log.warn("Agent loop exceeded max llm calls, max={}, totalTokens={}", maxLlmCalls, totalTokens);
+        return new AgentLoopResult("处理步骤超过上限，请简化问题后重试。", actualToolCalls, round, totalTokens);
     }
 
     /**
@@ -201,6 +242,30 @@ public class AgentLoopExecutor {
             return text;
         }
         return text.substring(0, maxChars) + "...(已截断)";
+    }
+
+    /**
+     * 估算消息序列的 Token 数（成本归因用）
+     */
+    private long estimateTokens(List<ChatMessage> messages) {
+        long sum = 0;
+        for (ChatMessage message : messages) {
+            sum += estimateTokens(message.getContent());
+            if (CollUtil.isNotEmpty(message.getToolCalls())) {
+                for (ToolCall tc : message.getToolCalls()) {
+                    sum += estimateTokens(tc.name());
+                }
+            }
+        }
+        return sum;
+    }
+
+    private long estimateTokens(String text) {
+        if (text == null) {
+            return 0;
+        }
+        Integer tokens = tokenCounterService.countTokens(text);
+        return tokens == null ? 0 : tokens;
     }
 
     /**

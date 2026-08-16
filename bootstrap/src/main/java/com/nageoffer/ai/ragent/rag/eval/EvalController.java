@@ -19,18 +19,27 @@ package com.nageoffer.ai.ragent.rag.eval;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
+import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeChunkDO;
 import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeDocumentDO;
 import com.nageoffer.ai.ragent.knowledge.dao.mapper.KnowledgeChunkMapper;
 import com.nageoffer.ai.ragent.knowledge.dao.mapper.KnowledgeDocumentMapper;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
+import com.nageoffer.ai.ragent.rag.core.agent.AgentLoopContext;
+import com.nageoffer.ai.ragent.rag.core.agent.AgentLoopExecutor;
+import com.nageoffer.ai.ragent.rag.core.agent.AgentLoopResult;
+import com.nageoffer.ai.ragent.rag.core.agent.AgentToolResolver;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentResolver;
+import com.nageoffer.ai.ragent.rag.core.prompt.PromptContext;
+import com.nageoffer.ai.ragent.rag.core.prompt.RAGPromptService;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrievalEngine;
 import com.nageoffer.ai.ragent.rag.core.rewrite.QueryRewriteService;
 import com.nageoffer.ai.ragent.rag.core.rewrite.RewriteResult;
+import com.nageoffer.ai.ragent.rag.dto.IntentGroup;
 import com.nageoffer.ai.ragent.rag.dto.RetrievalContext;
 import com.nageoffer.ai.ragent.rag.dto.SubQuestionIntent;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.nageoffer.ai.ragent.framework.convention.Result;
@@ -60,6 +69,9 @@ public class EvalController {
     private final SearchChannelProperties searchProperties;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final KnowledgeDocumentMapper knowledgeDocumentMapper;
+    private final AgentLoopExecutor agentLoopExecutor;
+    private final AgentToolResolver agentToolResolver;
+    private final RAGPromptService promptBuilder;
 
     @GetMapping("/rag/eval")
     public Result<EvalResponse> chat(@RequestParam String question) {
@@ -70,6 +82,48 @@ public class EvalController {
         RetrievalContext rc = retrievalEngine.retrieve(subIntents, searchProperties.getDefaultTopK());
 
         return Results.success(buildResponse(rc, subIntents, System.currentTimeMillis() - start));
+    }
+
+    /**
+     * Agent 工具调用评测：走 ReAct 循环（调 LLM），对比实际工具调用与期望工具调用
+     */
+    @GetMapping("/rag/eval/agent")
+    public Result<EvalResponse> chatAgent(@RequestParam String question,
+                                          @RequestParam(required = false) List<String> expectedToolCalls) {
+        long start = System.currentTimeMillis();
+
+        RewriteResult rewriteResult = queryRewriteService.rewriteWithSplit(question, List.of());
+        List<SubQuestionIntent> subIntents = intentResolver.resolve(rewriteResult);
+        // Agent 循环分支：只 KB 检索，工具由 LLM 自主调用
+        RetrievalContext rc = retrievalEngine.retrieveKbOnly(subIntents, searchProperties.getDefaultTopK());
+
+        // 工具白名单：仅暴露意图命中的 MCP 工具
+        List<Tool> whitelistTools = agentToolResolver.resolveWhitelistTools(subIntents);
+        IntentGroup mergedGroup = intentResolver.mergeIntentGroup(subIntents);
+        PromptContext promptContext = PromptContext.builder()
+                .question(rewriteResult.rewrittenQuestion())
+                .kbContext(rc.getKbContext())
+                .mcpContext(null)
+                .mcpIntents(mergedGroup.mcpIntents())
+                .kbIntents(mergedGroup.kbIntents())
+                .intentChunks(rc.getIntentChunks())
+                .build();
+        List<ChatMessage> messages = promptBuilder.buildStructuredMessages(
+                promptContext, List.of(), rewriteResult.rewrittenQuestion(), rewriteResult.subQuestions());
+
+        AgentLoopContext loopCtx = AgentLoopContext.builder()
+                .messages(messages)
+                .tools(whitelistTools)
+                .build();
+
+        AgentLoopResult loopResult = agentLoopExecutor.runWithMetadata(loopCtx);
+
+        EvalResponse response = buildResponse(rc, subIntents, System.currentTimeMillis() - start);
+        response.setExpectedToolCalls(expectedToolCalls);
+        response.setActualToolCalls(loopResult.toolCalls());
+        response.setToolCallRound(loopResult.round());
+        response.setTotalTokens(loopResult.totalTokens());
+        return Results.success(response);
     }
 
     private EvalResponse buildResponse(RetrievalContext rc, List<SubQuestionIntent> subIntents, long latencyMs) {

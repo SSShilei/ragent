@@ -22,12 +22,14 @@ import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.convention.LLMResponse;
 import com.nageoffer.ai.ragent.framework.convention.ToolCall;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
+import com.nageoffer.ai.ragent.infra.token.TokenCounterService;
 import com.nageoffer.ai.ragent.rag.config.AgentProperties;
 import com.nageoffer.ai.ragent.rag.core.mcp.McpToolExecutor;
 import com.nageoffer.ai.ragent.rag.core.mcp.McpToolRegistry;
 import com.nageoffer.ai.ragent.rag.core.mcp.McpToolSchemaConverter;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -50,11 +52,20 @@ class AgentLoopExecutorTest {
     private final LLMService llmService = mock(LLMService.class);
     private final McpToolRegistry toolRegistry = mock(McpToolRegistry.class);
     private final McpToolSchemaConverter schemaConverter = new McpToolSchemaConverter();
+    private final AgentLoopCheckpointStore checkpointStore = mock(AgentLoopCheckpointStore.class);
+    private final TokenCounterService tokenCounterService = mock(TokenCounterService.class);
     // 同步执行器，避免测试中的线程切换不确定性
     private final Executor directExecutor = Runnable::run;
 
-    private final AgentLoopExecutor loop =
-            new AgentLoopExecutor(llmService, toolRegistry, schemaConverter, directExecutor, new AgentProperties());
+    private final AgentLoopExecutor loop = new AgentLoopExecutor(
+            llmService, toolRegistry, schemaConverter, directExecutor, new AgentProperties(),
+            checkpointStore, tokenCounterService);
+
+    @BeforeEach
+    void setUp() {
+        // 默认无断点，避免 mock 返回 null 触发 NPE
+        when(checkpointStore.load(any())).thenReturn(Optional.empty());
+    }
 
     @Test
     void returnsTextAnswerDirectly() {

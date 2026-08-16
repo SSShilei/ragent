@@ -259,6 +259,7 @@ public class StreamChatPipeline {
         AgentLoopContext loopCtx = AgentLoopContext.builder()
                 .messages(messages)
                 .tools(whitelistTools)
+                .taskId(ctx.getTaskId())
                 .build();
         String answer = agentLoopExecutor.run(loopCtx);
 

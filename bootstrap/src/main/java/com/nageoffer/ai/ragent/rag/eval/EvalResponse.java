@@ -80,4 +80,24 @@ public class EvalResponse {
      * 总耗时（毫秒）
      */
     private long latencyMs;
+
+    /**
+     * 评测集标注的期望工具调用列表（Agent 评测用，如 ["weather_query"]）
+     */
+    private List<String> expectedToolCalls;
+
+    /**
+     * Function Calling 实际调用的工具名列表（按调用顺序，含重复）
+     */
+    private List<String> actualToolCalls;
+
+    /**
+     * Agent 循环实际执行的 LLM 调用轮数
+     */
+    private int toolCallRound;
+
+    /**
+     * Agent 循环累计 Token 估算（请求 + 响应）
+     */
+    private long totalTokens;
 }

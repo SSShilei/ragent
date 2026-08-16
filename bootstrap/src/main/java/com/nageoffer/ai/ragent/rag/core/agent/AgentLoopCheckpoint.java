@@ -18,36 +18,18 @@
 package com.nageoffer.ai.ragent.rag.core.agent;
 
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
-import io.modelcontextprotocol.spec.McpSchema.Tool;
-import lombok.Builder;
-import lombok.Data;
 
 import java.util.List;
 
 /**
- * Agent 循环上下文
+ * Agent 循环断点
  * <p>
- * 承载一次 ReAct 循环所需的全部入参：消息序列与可用工具清单。
- * 消息序列在循环中不断追加 assistant tool_calls 与 tool 结果，最终产出文本答案。
+ * 记录某一轮结束后的循环状态：已执行轮数、完整消息序列与保存时间戳，
+ * 用于实例崩溃后从断点续跑而非从头重来。
+ *
+ * @param round     已完成的循环轮数（恢复后从下一轮继续）
+ * @param messages  截至当前轮的完整消息序列（含 assistant tool_calls 与 tool 结果）
+ * @param timestamp 保存时间戳（毫秒）
  */
-@Data
-@Builder
-public class AgentLoopContext {
-
-    /**
-     * 对话消息序列（含系统提示词、历史与当前问题）
-     */
-    private List<ChatMessage> messages;
-
-    /**
-     * 可用工具清单（MCP Tool 定义），经 Schema 转换后作为 Function Calling 的 tools 声明
-     */
-    private List<Tool> tools;
-
-    /**
-     * 任务 ID（可选）
-     * <p>
-     * 用于 Redis checkpoint 断点恢复：非空时循环每轮保存断点，实例崩溃后可从断点续跑
-     */
-    private String taskId;
+public record AgentLoopCheckpoint(int round, List<ChatMessage> messages, long timestamp) {
 }
