@@ -1,6 +1,6 @@
 # Ragent 面试笔记索引
 
-> `/home/shilei/IdeaProjects/ragent/docs-interview/` 下共 3 个 Markdown 文件。
+> `/home/shilei/IdeaProjects/ragent/docs-interview/` 下共 13 个 Markdown 文件。
 > 使用方式：搜索关键词定位到对应文件，再根据行号精确定位。
 
 ---
@@ -11,6 +11,7 @@
 |:---|:---|:---|
 | `ragent-interview-notes.md` | 1116 | 原版：侧重管线细节、切分案例、设计模式 |
 | `ragent-interview-notes-2.md` | 1381 | 扩展版：侧重表结构、意图树、RRF 归一化、Agentic RAG |
+| `ragent-live-troubleshooting-qa.md` | 434 | **实战排查 Q&A**：SSE 选型、Function Calling vs MCP、稳定性机制、慢链路排查、MinerU 集成、Eval 闭环、多 Agent 框架、checkpoint 恢复 |
 | `ragent-chunking-analysis.md` | — | **Chunking 专题**：Parser 矩阵、Block 模型、分块流程、与 AgentFlow 对比、六种业界策略评估 |
 | `ragent-intent-rewrite-config.md` | — | **意图树 & Query 重写**：t_intent_node 配置 SQL、KB 意图识别流程、并行/串行关系、改写模型选型、temperature 调参 |
 

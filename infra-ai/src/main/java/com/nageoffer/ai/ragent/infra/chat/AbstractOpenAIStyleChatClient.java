@@ -260,6 +260,10 @@ public abstract class AbstractOpenAIStyleChatClient implements ChatClient {
                 JsonObject msg = new JsonObject();
                 msg.addProperty("role", toOpenAiRole(m.getRole()));
                 msg.addProperty("content", m.getContent());
+                // TOOL 角色消息需携带 tool_call_id，用于把工具结果回填到对应的 assistant tool_call
+                if (m.getRole() == ChatMessage.Role.TOOL && m.getToolCallId() != null) {
+                    msg.addProperty("tool_call_id", m.getToolCallId());
+                }
                 arr.add(msg);
             }
         }
@@ -271,6 +275,7 @@ public abstract class AbstractOpenAIStyleChatClient implements ChatClient {
             case SYSTEM -> "system";
             case USER -> "user";
             case ASSISTANT -> "assistant";
+            case TOOL -> "tool";
         };
     }
 

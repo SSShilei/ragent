@@ -56,7 +56,12 @@ public class ChatMessage {
         /**
          * 助手机器人角色，表示大模型返回的回复内容
          */
-        ASSISTANT;
+        ASSISTANT,
+
+        /**
+         * 工具角色，表示一次工具调用的返回结果，与 assistant 消息中的 tool_calls 一一对应
+         */
+        TOOL;
 
         /**
          * 根据字符串值匹配对应的角色枚举
@@ -94,6 +99,14 @@ public class ChatMessage {
      * 深度思考耗时（秒，仅 ASSISTANT 角色可能携带）
      */
     private Integer thinkingDuration;
+
+    /**
+     * 工具调用 ID（仅 TOOL 角色携带）
+     * <p>
+     * 用于把工具执行结果回填到 assistant 消息中对应的 tool_call，
+     * 是 Function Calling 循环回填的关键关联键
+     */
+    private String toolCallId;
 
     public ChatMessage(Role role, String content) {
         this.role = role;
@@ -153,6 +166,19 @@ public class ChatMessage {
         ChatMessage message = new ChatMessage(Role.ASSISTANT, content);
         message.setThinkingContent(thinkingContent);
         message.setThinkingDuration(thinkingDuration);
+        return message;
+    }
+
+    /**
+     * 创建一条工具结果消息
+     *
+     * @param toolCallId 对应的工具调用 ID（来自 assistant 消息的 tool_calls）
+     * @param content    工具返回的结果内容
+     * @return 封装好的 {@link ChatMessage} 对象，角色为 {@link Role#TOOL}
+     */
+    public static ChatMessage tool(String toolCallId, String content) {
+        ChatMessage message = new ChatMessage(Role.TOOL, content);
+        message.setToolCallId(toolCallId);
         return message;
     }
 }
