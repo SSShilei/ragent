@@ -138,7 +138,11 @@ public class RAGPromptService {
         if (context.hasMcp() && context.hasKb()) {
             return planMixed(context);
         }
-        throw new IllegalStateException("PromptContext requires MCP or KB context.");
+        // Agent 循环等场景：KB 与 MCP 均无上下文（工具尚未执行）时走空场景，返回空提示词
+        return PromptBuildPlan.builder()
+                .scene(PromptScene.EMPTY)
+                .question(context.getQuestion())
+                .build();
     }
 
     private PromptBuildPlan planKbOnly(PromptContext context) {

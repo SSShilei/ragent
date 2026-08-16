@@ -25,6 +25,7 @@ import lombok.Builder.Default;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 通用大模型请求对象
@@ -110,15 +111,12 @@ public class ChatRequest {
     private Boolean thinking;
 
     /**
-     * 可选：是否启用工具调用（Tool Calling / Function Calling）
+     * 工具声明列表（OpenAI Function Calling 的 tools 数组格式）
      * <p>
-     * 当前预留字段，方便后续扩展为带工具调用能力的对话请求：
-     * <ul>
-     *   <li>{@code false}：只进行纯文本对话</li>
-     *   <li>{@code true}：允许模型按照定义调用工具 / 函数</li>
-     * </ul>
-     * 具体工具列表、调用结果处理由上层或实现层定义
-     * </p>
+     * 由 {@code McpToolSchemaConverter} 将 MCP 工具 Schema 转换而来，
+     * 非空时请求会携带 tools 参数，模型据此返回 tool_calls（{@link ToolCall}）。
+     * 为空时等价于普通文本对话，不启用工具调用能力。
      */
-    private Boolean enableTools;
+    @Default
+    private List<Map<String, Object>> tools = new ArrayList<>();
 }

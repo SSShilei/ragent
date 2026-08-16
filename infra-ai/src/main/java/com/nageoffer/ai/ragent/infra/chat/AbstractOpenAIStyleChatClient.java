@@ -23,6 +23,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.convention.LLMResponse;
+import com.nageoffer.ai.ragent.framework.convention.ToolCall;
 import com.nageoffer.ai.ragent.framework.trace.RagStreamTraceSupport;
 import com.nageoffer.ai.ragent.framework.trace.RagStreamTraceSupport.StreamSpan;
 import com.nageoffer.ai.ragent.infra.config.AIModelProperties;
@@ -93,7 +95,28 @@ public abstract class AbstractOpenAIStyleChatClient implements ChatClient {
 
     // ==================== 模板方法：同步调用 ====================
 
+    @Override
+    public LLMResponse chatWithTools(ChatRequest request, ModelTarget target) {
+        return doChatWithTools(request, target);
+    }
+
     protected String doChat(ChatRequest request, ModelTarget target) {
+        JsonObject respJson = doSyncRequest(request, target);
+        return extractChatContent(respJson);
+    }
+
+    /**
+     * 同步调用并返回结构化响应（文本 + tool_calls），供 Function Calling 决策层使用
+     */
+    protected LLMResponse doChatWithTools(ChatRequest request, ModelTarget target) {
+        JsonObject respJson = doSyncRequest(request, target);
+        return OpenAIResponseParser.parse(gson, respJson);
+    }
+
+    /**
+     * 同步请求公共逻辑：鉴权、构建请求体、发送、校验 HTTP 状态并解析响应 JSON
+     */
+    private JsonObject doSyncRequest(ChatRequest request, ModelTarget target) {
         AIModelProperties.ProviderConfig provider = HttpResponseHelper.requireProvider(target, provider());
         if (requiresApiKey()) {
             HttpResponseHelper.requireApiKey(provider, provider());
@@ -104,7 +127,6 @@ public abstract class AbstractOpenAIStyleChatClient implements ChatClient {
                 .post(RequestBody.create(reqBody.toString(), HttpMediaTypes.JSON))
                 .build();
 
-        JsonObject respJson;
         try (Response response = syncHttpClient.newCall(requestHttp).execute()) {
             if (!response.isSuccessful()) {
                 String body = HttpResponseHelper.readBody(response.body());
@@ -115,14 +137,12 @@ public abstract class AbstractOpenAIStyleChatClient implements ChatClient {
                         response.code()
                 );
             }
-            respJson = HttpResponseHelper.parseJson(response.body(), provider());
+            return HttpResponseHelper.parseJson(response.body(), provider());
         } catch (IOException e) {
             throw new ModelClientException(
                     provider() + " 同步请求失败: " + e.getMessage(),
                     ModelClientErrorType.NETWORK_ERROR, null, e);
         }
-
-        return extractChatContent(respJson);
     }
 
     // ==================== 模板方法：流式调用 ====================
@@ -235,6 +255,11 @@ public abstract class AbstractOpenAIStyleChatClient implements ChatClient {
 
         body.add("messages", buildMessages(request));
 
+        // Function Calling：tools 声明非空时序列化到请求体
+        if (CollUtil.isNotEmpty(request.getTools())) {
+            body.add("tools", gson.toJsonTree(request.getTools()));
+        }
+
         if (request.getTemperature() != null) {
             body.addProperty("temperature", request.getTemperature());
         }
@@ -259,13 +284,37 @@ public abstract class AbstractOpenAIStyleChatClient implements ChatClient {
             for (ChatMessage m : messages) {
                 JsonObject msg = new JsonObject();
                 msg.addProperty("role", toOpenAiRole(m.getRole()));
-                msg.addProperty("content", m.getContent());
+                if (m.getRole() == ChatMessage.Role.ASSISTANT && CollUtil.isNotEmpty(m.getToolCalls())) {
+                    // assistant 消息携带 tool_calls 时 content 为空，输出 tool_calls 数组
+                    msg.add("tool_calls", buildToolCalls(m.getToolCalls()));
+                } else {
+                    msg.addProperty("content", m.getContent());
+                }
                 // TOOL 角色消息需携带 tool_call_id，用于把工具结果回填到对应的 assistant tool_call
                 if (m.getRole() == ChatMessage.Role.TOOL && m.getToolCallId() != null) {
                     msg.addProperty("tool_call_id", m.getToolCallId());
                 }
                 arr.add(msg);
             }
+        }
+        return arr;
+    }
+
+    /**
+     * 序列化 assistant 消息的 tool_calls 数组为 OpenAI 协议格式
+     */
+    private JsonArray buildToolCalls(List<ToolCall> toolCalls) {
+        JsonArray arr = new JsonArray();
+        for (ToolCall tc : toolCalls) {
+            JsonObject obj = new JsonObject();
+            obj.addProperty("id", tc.id());
+            obj.addProperty("type", "function");
+            JsonObject function = new JsonObject();
+            function.addProperty("name", tc.name());
+            // arguments 是 Map，序列化为 JSON 字符串（OpenAI 协议要求）
+            function.addProperty("arguments", gson.toJson(tc.arguments()));
+            obj.add("function", function);
+            arr.add(obj);
         }
         return arr;
     }

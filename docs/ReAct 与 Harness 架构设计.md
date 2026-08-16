@@ -170,7 +170,100 @@ flowchart TB
     Harness -- "beforeRound/afterRound 钩子" --> Core
 ```
 
-### 4.3 单轮时序
+![核心：Agent Harness 外壳 + ReAct 循环本体.png](%E6%A0%B8%E5%BF%83%EF%BC%9AAgent%20Harness%20%E5%A4%96%E5%A3%B3%20%2B%20ReAct%20%E5%BE%AA%E7%8E%AF%E6%9C%AC%E4%BD%93.png)
+
+### 4.3 核心: reAct+herness 循环架构
+
+```mermaid
+graph TD
+    %% 入口
+    User[用户问题] --> Harness[🚀 编排控制层 Harness<br>（状态管理 / 步数计数 / 超时控制）]
+
+    %% Harness 内部管控范围（用子图包裹）
+    subgraph Harness_Scope [Harness 内部管控范围]
+        
+        Harness --> Init[① 初始化上下文<br>加载历史/步数归零/设置MaxStep=6]
+        Init --> LLM[② 🧠 LLM 推理调用<br><b>（计费点：本轮迭代仅调用1次）</b>]
+        
+        %% 输出路由解析
+        LLM --> Router{③ 输出路由解析<br>（是否包含 tool_calls？）}
+        
+        %% 分支1：直接回复（无需工具）
+        Router -->|直接文本回答| Finalize[⑧ 生成最终回答]
+        
+        %% 分支2：工具调用（进入执行链）
+        Router -->|Function Call| Action[④ 执行动作 Action<br>（提取函数名/JSON参数）]
+        
+        Action --> Tool[⑤ 🔧 工具执行 Tool<br>（MCP协议网关 / 本地API）]
+        Tool --> Observe[⑥ 观察结果 Observation<br>（出口压缩/截断处理）]
+        
+        Observe --> Decision{⑦ 🎯 循环决策器<br>（步数超限? 信息增益归零? 置信度达标?）}
+        
+        %% 回环与终止
+        Decision -->|未完成 / 继续循环| Retry[步数计数器 +1]
+        Retry -->|携带 Observation 回传| LLM
+        
+        Decision -->|已完成 / 强制终止| Finalize
+        
+    end
+
+    %% 最终输出
+    Finalize --> Result[📤 返回最终结果给用户]
+```
+
+### 4.3 核心: reAct+herness 最终版本
+
+```mermaid
+graph TD
+    %% ==================== 第1层：用户接入与安全隔离（入口） ====================
+    User[用户问题] --> InputGuard[安全隔离网关 - 入口<br>Prompt注入检测 / SQL注入过滤 / 权限鉴权]
+    InputGuard --> Harness[编排控制层 Harness]
+
+    %% ==================== 第2层：Harness 管控范围 ====================
+    subgraph Harness_Scope [Harness 内部管控范围]
+        
+        Harness --> Init[初始化上下文环境]
+        Init --> Memory[长期记忆模块<br>向量数据库 / 历史会话检索]
+        Memory --> IngressComp[入口上下文压缩器<br>摘要缓冲 / 滑动窗口合并]
+        IngressComp --> LLM[LLM 推理调用<br>计费点：本轮迭代仅1次]
+
+        LLM --> Router{输出路由解析<br>是否包含 tool_calls？}
+
+        Router -->|直接文本| Finalize[生成最终回答]
+
+        Router -->|Function Call| Action[执行动作 Action<br>参数提取]
+
+        Action --> Sandbox[安全隔离沙箱 - 执行层<br>文件系统权限限制 / 网络白名单 / 容器隔离]
+        Sandbox --> Tool[工具执行 Tool<br>MCP协议网关 / 本地API]
+
+        Tool --> RawResult[原始结果返回]
+        RawResult --> EgressComp[出口上下文压缩器<br>超大结果截断 / 关键信息提取 / 小模型摘要]
+        
+        EgressComp --> Observe[观察结果 Observation<br>已压缩的标准化数据]
+        
+        Observe --> Decision{循环决策器<br>步数超限 / 信息增益归零 / 置信度达标}
+        
+        Decision -->|未完成 / 继续循环| Retry[步数计数器 +1]
+        Retry -->|携带 Observation| IngressComp
+
+        Decision -->|已完成 / 强制终止| Finalize
+    end
+
+    %% ==================== 第3层：输出安全隔离（出口） ====================
+    Finalize --> OutputGuard[安全隔离网关 - 出口<br>敏感数据脱敏 / 有害内容拦截 / 格式清洗]
+    OutputGuard --> Result[返回最终结果给用户]
+
+    %% ==================== 样式区分 ====================
+    style IngressComp fill:#f9f,stroke:#333,stroke-width:2px
+    style EgressComp fill:#f9f,stroke:#333,stroke-width:2px
+    style Memory fill:#ffd700,stroke:#333,stroke-width:2px
+    style Sandbox fill:#ff6347,stroke:#333,stroke-width:2px,color:white
+    style InputGuard fill:#ff6347,stroke:#333,stroke-width:2px,color:white
+    style OutputGuard fill:#ff6347,stroke:#333,stroke-width:2px,color:white
+```
+
+
+### 4.5 单轮时序
 
 ```mermaid
 sequenceDiagram

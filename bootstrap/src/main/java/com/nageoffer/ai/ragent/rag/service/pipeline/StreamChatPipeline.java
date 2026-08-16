@@ -24,6 +24,10 @@ import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.infra.chat.StreamCallback;
 import com.nageoffer.ai.ragent.infra.chat.StreamCancellationHandle;
+import com.nageoffer.ai.ragent.rag.config.AgentProperties;
+import com.nageoffer.ai.ragent.rag.core.agent.AgentLoopContext;
+import com.nageoffer.ai.ragent.rag.core.agent.AgentLoopExecutor;
+import com.nageoffer.ai.ragent.rag.core.agent.AgentToolResolver;
 import com.nageoffer.ai.ragent.rag.core.guidance.GuidanceDecision;
 import com.nageoffer.ai.ragent.rag.core.guidance.IntentGuidanceService;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentResolver;
@@ -39,6 +43,7 @@ import com.nageoffer.ai.ragent.rag.dto.RetrievalContext;
 import com.nageoffer.ai.ragent.rag.dto.SubQuestionIntent;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.service.handler.StreamTaskManager;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -71,6 +76,9 @@ public class StreamChatPipeline {
     private final RAGPromptService promptBuilder;
     private final PromptTemplateLoader promptTemplateLoader;
     private final StreamTaskManager taskManager;
+    private final AgentLoopExecutor agentLoopExecutor;
+    private final AgentToolResolver agentToolResolver;
+    private final AgentProperties agentProperties;
 
     /**
      * 执行流式对话管道
@@ -94,7 +102,15 @@ public class StreamChatPipeline {
             return;
         }
 
-        RetrievalContext retrievalCtx = retrieve(ctx);                       // ⑥ 检索
+        // ⑥ 检索：Agent 循环分支只做 KB 检索（工具由 LLM 自主调用），普通分支 KB + MCP 一次执行
+        boolean agentLoop = requiresAgentLoop(ctx);
+        RetrievalContext retrievalCtx = retrieve(ctx, agentLoop);
+
+        if (agentLoop) {
+            streamAgentLoopResponse(ctx, retrievalCtx);                      // ⑦-a ReAct 循环（可选增强分支）
+            return;
+        }
+
         if (handleEmptyRetrieval(ctx, retrievalCtx)) {                       // 检索空结果兜底（短路点 3）
             return;
         }
@@ -192,14 +208,64 @@ public class StreamChatPipeline {
     }
 
     /**
-     * ⑥ 检索：KB 多通道检索 + MCP 工具执行，产出统一 RetrievalContext
+     * ⑥ 检索：KB 多通道检索（可选叠加 MCP 工具单次执行），产出统一 RetrievalContext
      */
-    private RetrievalContext retrieve(StreamChatContext ctx) {
+    private RetrievalContext retrieve(StreamChatContext ctx, boolean kbOnly) {
         long start = System.currentTimeMillis();
-        RetrievalContext retrievalCtx = retrievalEngine.retrieve(ctx.getSubIntents(), searchProperties.getDefaultTopK());
-        log.info("Stage[6/7] retrieve finished, hasKb={}, hasMcp={}, elapsed={}ms",
-                retrievalCtx.hasKb(), retrievalCtx.hasMcp(), elapsed(start));
+        RetrievalContext retrievalCtx = kbOnly
+                ? retrievalEngine.retrieveKbOnly(ctx.getSubIntents(), searchProperties.getDefaultTopK())
+                : retrievalEngine.retrieve(ctx.getSubIntents(), searchProperties.getDefaultTopK());
+        log.info("Stage[6/7] retrieve finished, hasKb={}, hasMcp={}, kbOnly={}, elapsed={}ms",
+                retrievalCtx.hasKb(), retrievalCtx.hasMcp(), kbOnly, elapsed(start));
         return retrievalCtx;
+    }
+
+    /**
+     * 判断是否进入 Agent 循环：开关开启且意图命中 MCP 节点
+     */
+    private boolean requiresAgentLoop(StreamChatContext ctx) {
+        if (!agentProperties.isFunctionCallingEnabled()) {
+            return false;
+        }
+        IntentGroup mergedGroup = intentResolver.mergeIntentGroup(ctx.getSubIntents());
+        return CollUtil.isNotEmpty(mergedGroup.mcpIntents());
+    }
+
+    /**
+     * ⑦-a ReAct 循环：LLM 自主决定工具调用，产出最终答案后流式推送
+     */
+    private void streamAgentLoopResponse(StreamChatContext ctx, RetrievalContext retrievalCtx) {
+        long start = System.currentTimeMillis();
+        // 工具白名单：仅暴露意图命中的 MCP 工具，缩小 LLM 决策面
+        List<Tool> whitelistTools = agentToolResolver.resolveWhitelistTools(ctx.getSubIntents());
+
+        // 组装初始消息：KB 证据（若有）+ 问题，工具由 LLM 在循环中自主调用
+        IntentGroup mergedGroup = intentResolver.mergeIntentGroup(ctx.getSubIntents());
+        PromptContext promptContext = PromptContext.builder()
+                .question(ctx.getRewriteResult().rewrittenQuestion())
+                .kbContext(retrievalCtx.getKbContext())
+                .mcpContext(null)
+                .mcpIntents(mergedGroup.mcpIntents())
+                .kbIntents(mergedGroup.kbIntents())
+                .intentChunks(retrievalCtx.getIntentChunks())
+                .build();
+        List<ChatMessage> messages = promptBuilder.buildStructuredMessages(
+                promptContext,
+                ctx.getHistory(),
+                ctx.getRewriteResult().rewrittenQuestion(),
+                ctx.getRewriteResult().subQuestions()
+        );
+
+        AgentLoopContext loopCtx = AgentLoopContext.builder()
+                .messages(messages)
+                .tools(whitelistTools)
+                .build();
+        String answer = agentLoopExecutor.run(loopCtx);
+
+        ctx.getCallback().onContent(answer);
+        ctx.getCallback().onComplete();
+        log.info("Agent loop response finished, whitelistTools={}, answerLength={}, elapsed={}ms",
+                whitelistTools.size(), answer.length(), elapsed(start));
     }
 
     /**

@@ -21,6 +21,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * 对话消息实体
  *
@@ -108,6 +110,13 @@ public class ChatMessage {
      */
     private String toolCallId;
 
+    /**
+     * 工具调用列表（仅 ASSISTANT 角色可能携带）
+     * <p>
+     * 模型在 Function Calling 决策阶段返回的 tool_calls，与后续 TOOL 消息一一对应
+     */
+    private List<ToolCall> toolCalls;
+
     public ChatMessage(Role role, String content) {
         this.role = role;
         this.content = content;
@@ -179,6 +188,21 @@ public class ChatMessage {
     public static ChatMessage tool(String toolCallId, String content) {
         ChatMessage message = new ChatMessage(Role.TOOL, content);
         message.setToolCallId(toolCallId);
+        return message;
+    }
+
+    /**
+     * 创建一条携带工具调用的助手消息（content 为空）
+     * <p>
+     * 用于 Function Calling 循环中，把模型返回的 tool_calls 回填进消息序列，
+     * 使后续 TOOL 消息能与对应 tool_call 正确配对。
+     *
+     * @param toolCalls 模型返回的工具调用列表
+     * @return 封装好的 {@link ChatMessage} 对象，角色为 {@link Role#ASSISTANT}
+     */
+    public static ChatMessage assistantWithToolCalls(List<ToolCall> toolCalls) {
+        ChatMessage message = new ChatMessage(Role.ASSISTANT, null);
+        message.setToolCalls(toolCalls);
         return message;
     }
 }

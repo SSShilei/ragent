@@ -19,6 +19,7 @@ package com.nageoffer.ai.ragent.infra.chat;
 
 import cn.hutool.core.collection.CollUtil;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.convention.LLMResponse;
 import com.nageoffer.ai.ragent.framework.errorcode.BaseErrorCode;
 import com.nageoffer.ai.ragent.framework.exception.RemoteException;
 import com.nageoffer.ai.ragent.framework.trace.RagTraceNode;
@@ -95,6 +96,17 @@ public class RoutingLLMService implements LLMService {
                 List.of(resolveTarget(modelId, Boolean.TRUE.equals(request.getThinking()))),
                 target -> clientsByProvider.get(target.candidate().getProvider()),
                 (client, target) -> client.chat(request, target)
+        );
+    }
+
+    @Override
+    @RagTraceNode(name = "llm-chat-routing", type = "LLM_ROUTING")
+    public LLMResponse chatWithTools(ChatRequest request) {
+        return executor.executeWithFallback(
+                ModelCapability.CHAT,
+                selector.selectChatCandidates(Boolean.TRUE.equals(request.getThinking())),
+                target -> clientsByProvider.get(target.candidate().getProvider()),
+                (client, target) -> client.chatWithTools(request, target)
         );
     }
 

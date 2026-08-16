@@ -19,6 +19,7 @@ package com.nageoffer.ai.ragent.infra.chat;
 
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.convention.LLMResponse;
 
 import java.util.List;
 
@@ -99,6 +100,17 @@ public interface LLMService {
     default String chat(ChatRequest request, String modelId) {
         return chat(request);
     }
+
+    /**
+     * 同步调用（结构化返回）
+     * <p>
+     * 与 {@link #chat(ChatRequest)} 不同，返回结构化 {@link LLMResponse}，
+     * 同时承载文本内容与 tool_calls。请求需携带 tools 声明，模型才会返回 tool_calls。
+     *
+     * @param request ChatRequest 完整配置的请求（含 tools 声明）
+     * @return 结构化响应，含文本内容与工具调用列表
+     */
+    LLMResponse chatWithTools(ChatRequest request);
 
     /**
      * 流式调用（简化模式）

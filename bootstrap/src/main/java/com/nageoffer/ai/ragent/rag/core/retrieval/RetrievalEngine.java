@@ -76,6 +76,20 @@ public class RetrievalEngine {
      */
     @RagTraceNode(name = "retrieval-engine", type = "RETRIEVE")
     public RetrievalContext retrieve(List<SubQuestionIntent> subIntents, int topK) {
+        return retrieve(subIntents, topK, true);
+    }
+
+    /**
+     * 仅知识库检索（跳过 MCP 工具预执行）
+     * <p>
+     * 供 Agent 循环分支使用：工具调用交由 LLM 在 ReAct 循环中自主决策，
+     * 此处只产出 KB 检索上下文作为初始证据。
+     */
+    public RetrievalContext retrieveKbOnly(List<SubQuestionIntent> subIntents, int topK) {
+        return retrieve(subIntents, topK, false);
+    }
+
+    private RetrievalContext retrieve(List<SubQuestionIntent> subIntents, int topK, boolean executeMcp) {
         long start = System.currentTimeMillis();
         if (CollUtil.isEmpty(subIntents)) {
             log.warn("RetrievalEngine skipped, subIntents is empty");
@@ -92,7 +106,8 @@ public class RetrievalEngine {
                             try {
                                 return buildSubQuestionContext(
                                         si,
-                                        resolveSubQuestionTopK(si, finalTopK)
+                                        resolveSubQuestionTopK(si, finalTopK),
+                                        executeMcp
                                 );
                             } catch (Exception e) {
                                 log.error("子问题上下文构建失败，降级为空上下文，question：{}", si.subQuestion(), e);
@@ -155,14 +170,15 @@ public class RetrievalEngine {
     /**
      * 构建单个子问题的检索上下文：KB 检索 + MCP 工具执行并行组织，产出该子问题的 KB/MCP 文本
      */
-    private SubQuestionContext buildSubQuestionContext(SubQuestionIntent intent, int topK) {
+    private SubQuestionContext buildSubQuestionContext(SubQuestionIntent intent, int topK, boolean executeMcp) {
         long start = System.currentTimeMillis();
         List<NodeScore> kbIntents = NodeScoreFilters.kb(intent.nodeScores());
         List<NodeScore> mcpIntents = NodeScoreFilters.mcp(intent.nodeScores());
 
         KbResult kbResult = retrieveAndRerank(intent, kbIntents, topK);
 
-        String mcpContext = CollUtil.isNotEmpty(mcpIntents)
+        // executeMcp=false 时跳过 MCP 预执行，工具交由 Agent 循环自主调用
+        String mcpContext = executeMcp && CollUtil.isNotEmpty(mcpIntents)
                 ? executeMcpAndMerge(intent.subQuestion(), mcpIntents)
                 : "";
 

@@ -98,6 +98,14 @@ rag:
     max-variants: 3         # 最大变体数量（不含原始 rewrite）
     min-query-chars: 10     # query 字符数低于此值触发扩展，超过跳过
 
+  agent:
+    function-calling:
+      enabled: false                 # ReAct 循环总开关，默认关。开启后意图命中 MCP 节点时 LLM 自主调用工具
+      max-llm-calls: 15              # 循环 LLM 调用硬上限，防死循环
+      max-tool-output-chars: 4000    # 单工具结果最大字符数，超出截断
+      max-consecutive-same-tool: 3   # 连续调用同一工具上限，超过终止
+      single-tool-timeout-seconds: 30    # 单工具执行超时（秒）
+
   rerank:
     enabled: true
 

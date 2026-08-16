@@ -18,6 +18,7 @@
 package com.nageoffer.ai.ragent.infra.chat;
 
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.convention.LLMResponse;
 import com.nageoffer.ai.ragent.infra.enums.ModelProvider;
 import com.nageoffer.ai.ragent.infra.model.ModelTarget;
 
@@ -54,4 +55,17 @@ public interface ChatClient {
      * @return 流取消处理器，可用于中断正在进行的流式响应
      */
     StreamCancellationHandle streamChat(ChatRequest request, StreamCallback callback, ModelTarget target);
+
+    /**
+     * 同步聊天（结构化返回）
+     * <p>
+     * 与 {@link #chat(ChatRequest, ModelTarget)} 的区别：返回结构化 {@link LLMResponse}，
+     * 同时承载文本内容与 tool_calls，供 Function Calling 决策层使用。
+     * 请求需携带 tools 声明，模型才会返回 tool_calls。
+     *
+     * @param request 聊天请求对象，含 tools 声明
+     * @param target  目标模型配置
+     * @return 结构化响应，含文本内容与工具调用列表
+     */
+    LLMResponse chatWithTools(ChatRequest request, ModelTarget target);
 }
