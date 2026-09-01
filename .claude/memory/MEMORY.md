@@ -1,5 +1,7 @@
 - [PowerAgent 文档索引](poweragent-doc-index.md) — PA 项目 16 个文档（doc-poweragent/）的完整索引，覆盖架构/源码/面试 Q&A
 - [PowerAgent 问题分类索引](poweragent-qa-index.md) — 入口；完整可点击索引见 [docs-interview/poweragent-qa-index.md](../../doc-poweragent/poweragent-qa-index.md)
 - [PowerAgent 简历 Q&A（主文档）](../../docs-interview/poweragent-resume-qa-0804.md) — PA 简历面试问答（docs-interview/）：DAG(12)+Agent(8)+记忆(7)+0804补充
+- [PowerAgent 简历 Q&A（0820 补充）](../../docs-interview/poweragent-resume-qa-0820.md) — PA 0820 补充：tool_calls 响应结构 + 长期记忆内容设计（topic/QA/摘要）
+- [PowerAgent 简历 Q&A（0826 SSE 专题）](../../docs-interview/poweragent-resume-qa-0826.md) — PA 0826 补充：SSE 流式实现 + 面试追问 + 完成性保证 + 监控
 - [Ragent 问题分类索引](ragent-qa-index.md) — 入口；完整可点击索引见 [docs-interview/ragent-qa-index.md](../../docs-interview/ragent-qa-index.md)
 - [Ragent 面试笔记索引（旧）](ragent-doc-index.md) — Ragent 笔记的旧版索引

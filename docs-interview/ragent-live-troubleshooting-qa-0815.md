@@ -876,3 +876,178 @@ AgentFlow（工作流编排引擎）和 Agent 推理层是两套东西：
 3. **真正持久化的只有长期记忆**（Memory/mem0）——跨会话，必须落盘。
 
 这呼应"断点重续"话题：PowerAgent 的 skill 中间状态大多不持久化，实例挂了 Agent 任务会丢。真正做断点续跑，需要给 Session 和 FlowContext 加 checkpoint。
+
+---
+
+<a id="q24"></a>
+## Q24: 短期记忆（Redis Session）的数据结构、过期与续期
+
+### 短期记忆 = ADK Session 的 Event 列表
+
+PowerAgent 的短期记忆就是**对话历史**，存 ADK 的 `Session`，核心是一个 **Event 列表**：
+
+```python
+event = Event(
+    invocation_id=self.request_id,    # 哪次请求产生的
+    author="user" / "strategy_agent", # 谁说的
+    id=uuid.uuid4().hex,             # 唯一 ID
+    content=types.Content(
+        parts=[types.Part.from_text(text=item.value)],
+        role="user" / "model",
+    ),
+)
+```
+
+**Redis 存储**：
+
+```
+Key:  app_name:user_id:session_id
+  app_name   = "auto_agent_{tenantid}"   ← 按租户隔离
+  user_id    = user.userid               ← 按用户隔离
+  session_id = chat_id                   ← 按会话隔离
+
+Value: 整个 Session 序列化成 JSON（含 events 列表 + token_count）
+{
+  "events": [
+    {
+      "invocationId": "req_20260817_001",
+      "author": "user",
+      "id": "e1a2b3c4",
+      "content": {
+        "parts": [{"text": "帮我分析这份销售数据"}],
+        "role": "user"
+      },
+      "timestamp": 1723881600000
+    }
+  ],
+  "token_count": 156,
+  "version": 1,          // 乐观锁版本号（可选，用于极端并发校验）
+  "last_active": 1723881600000  // 最后活跃时间（用于监控冷热）
+}
+
+```
+
+### 应该用什么数据结构（选型分析）
+
+**核心洞察**：短期记忆的操作粒度是"**整个会话**"（整段读、尾部追加、整体截断），不是单条 Event。
+
+| 结构 | 追加 | 全量读 | 截断 | 并发安全 | 结论 |
+|---|---|---|---|---|---|
+| **String + JSON** | GET+SET（读改写） | GET 一次拿全 | 反序列化重写 | ❌ 有竞态 | ✅ 推荐 |
+| List | LPUSH/RPUSH | LRANGE 0 -1 | LTRIM | ✅ | ⚠️ 语义不匹配 |
+| Hash | HSET | HGETALL | HDEL | ✅ | ❌ 无序不适合有序事件 |
+| Stream | XADD | XRANGE | XTRIM | ✅ | ❌ 消息流不是状态 |
+| RedisJSON | JSON 路径 | JSON.GET | JSON 截断 | ✅ | 超大会话才考虑 |
+
+**推荐 String + JSON**：
+1. 操作粒度匹配（整段读 → GET 一次拿完）
+2. 最接近 ADK 的内存 Session 语义（events 列表对象 → JSON 序列化）
+3. 简单可靠，一个 key 一个值
+
+### 过期时间设置
+
+**没有统一答案，取决于会话类型**：
+
+```
+短期会话（问答型）: 30 分钟 ~ 2 小时
+工作会话（数据分析）: 1 天 ~ 3 天
+长期会话（个性化助手）: 7 天 ~ 30 天
+```
+
+Google ADK 默认 Session TTL 是 **7 天**，生产一般按场景覆盖。
+
+```python
+SESSION_TTL_BY_TYPE = {
+    "chat": 2 * 3600,        # 普通问答 2 小时
+    "analysis": 3 * 86400,   # 数据分析 3 天
+    "assistant": 30 * 86400  # 长期助手 30 天
+}
+```
+
+### 续期机制
+
+**每次活跃请求刷新 TTL**（活跃就不丢，离开自动清）：
+
+```python
+async def _init_session(self):
+    session = await session_service.get_session(**kwargs)
+    if session:
+        # ★ 续期：重置 TTL，会话活跃就永不超时
+        await session_service.refresh_session_ttl(session, ttl=SESSION_TTL_SECONDS)
+```
+
+**为什么必须续期**：
+
+```
+不续期: 第 1 天聊 10 轮，TTL 7 天，第 8 天回来 → Session 过期失忆
+续期后: 每次活跃刷新 TTL，只要持续活跃永不丢失，离开 7 天自动清理
+```
+
+**优化**：不是每次都续，快到一半才续（省 Redis 调用）：
+
+```python
+def maybe_refresh_ttl(session):
+    remaining = redis.ttl(session_key)
+    if remaining < SESSION_TTL_SECONDS // 2:
+        redis.expire(session_key, SESSION_TTL_SECONDS)
+```
+
+### 上下文压缩后怎么更新缓存
+
+**所有写回必须原子**，否则并发请求互相覆盖导致会话不一致。
+
+**两种截断策略**：
+
+```
+策略 A: 临时截断（不更新 Redis）—— PA 的轮次级截断
+  Session 在 Redis 里是完整的，每次 LLM 调用前内存截断
+  → Redis 不改，天然一致 ✅
+
+策略 B: 永久删除（更新 Redis）—— PA 的 30K 会话级截断
+  reset_session_events 真正删除旧事件
+  → 必须原子替换（Lua），否则并发读不一致
+```
+
+**策略 B 的 Lua 原子替换**：
+
+```lua
+-- reset_session_events 原子写回
+local s = redis.call('GET', KEYS[1])
+local obj = cjson.decode(s)
+obj.events = ARGV[1]       -- 已过滤的事件
+obj.token_count = ARGV[2]  -- 重算的 token
+redis.call('SET', KEYS[1], cjson.encode(obj), 'EX', ARGV[3])
+```
+
+**如果是压缩（非截断）**，更新为"摘要 + 最近 N 轮原文"整体原子写回：
+
+```python
+def compress_session(session_id, keep_rounds, summary_max_chars):
+    session = get_session(session_id)
+    recent = session.events[-keep_rounds:]    # 保留最近 N 轮原文
+    old = session.events[:-keep_rounds]        # 旧事件
+    summary = llm_summarize(old)               # LLM 压缩
+
+    new_events = [summary_event(summary)] + recent  # 摘要 + 最近原文
+    session.events = new_events
+    session.token_count = sum_token(new_events)
+    lua_atomic_set(session_id, session)        # ★ 原子写回
+```
+
+### 工程 Checklist
+
+| 项 | 建议 |
+|---|---|
+| 过期时间 | 会话型 7 天，按场景可调（问答 2h / 分析 3d / 助手 30d） |
+| 续期机制 | 每次活跃请求刷新 TTL（或快到一半才续） |
+| 截断同步 | 临时截断不写 Redis；永久截断用 Lua 原子替换 |
+| token 统计 | Session 维护 token_count 字段，截断后重算 |
+| 一致性 | 所有写回 Lua 原子化，防并发覆盖 |
+
+### 面试话术
+
+> 短期记忆存 Redis，本质是一个 Session 对象 = 一个 Event 列表，按 app_name + user_id + session_id 定位 key，整个 Session 序列化成 JSON。选 String + JSON 是因为操作粒度是"整段读、尾部追加、整体截断"，粒度匹配 GET/SET，最接近 ADK 的内存 Session 语义。
+>
+> 过期时间按场景设——问答 2 小时、数据分析 3 天、长期助手 30 天（ADK 默认 7 天）。续期是每次活跃请求刷新 TTL，活跃就不丢，离开自动清。
+>
+> 上下文压缩后关键是"写回必须原子"——临时截断（内存）不写 Redis 天然一致，永久截断（30K 级）用 Lua 原子替换防并发覆盖，如果是摘要压缩则"摘要 + 最近 N 轮原文"整体原子写回。核心原则是所有对 Redis 的写回都必须是原子的，否则并发请求会互相覆盖导致会话状态不一致。
