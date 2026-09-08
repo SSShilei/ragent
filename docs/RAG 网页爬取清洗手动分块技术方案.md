@@ -769,13 +769,92 @@ private void validateWhitelist(String url) {
 
 ---
 
-## 五、手动 chunk 与增量更新方案的衔接
+## 五、网页更新检测与增量衔接
 
-若用户的可点击分块产生的是**基于 markdown 偏移区间**的边界配置，天然可以与上一轮的增量更新方案对接：
+### 5.1 网页变更检测：三层信号
+
+网页是动态生成的，`ETag`/`Last-Modified` 常缺失或不准确，且页面可能每次访问都带时间戳/验证码导致内容抖动。**判断"更新了"要看清洗后正文而非原始 HTML 字节**，用三级信号逐层收敛，避免高频轮询打爆源站：
+
+| 层级 | 信号 | 成本 | 可靠性 | 作用 |
+|---|---|---|---|---|
+| L1 HTTP 头 | `ETag` / `Last-Modified` / `Content-Length` | 极低（HEAD） | 低（动态页常无/不变） | 先筛掉"明显没变" |
+| L2 轻量采样 | 渲染后取 `<title>` + 前 N 字符 + 正文长度，算采样 hash | 中 | 中 | 快速排除大部分未变页面 |
+| L3 完整清洗 hash | Playwright 全渲染 → 清洗 → **markdown 全文 contentHash** | 高 | 高 | 最终确认是否重爬 |
+
+```python
+# spider-server/orchestrator.py
+def check_changed(url, prev: PageSnapshot) -> ChangeDecision:
+    """三级信号逐层收敛: 能早退就早退, L3 只在疑似变化时付出渲染成本"""
+    head = fetch_head(url)                                   # L1: 几乎零成本
+    if head.etag and head.etag == prev.etag:
+        return ChangeDecision.SKIP("ETag 未变化")
+
+    sample = light_fetch_and_sample(url)                     # L2: 一次轻请求
+    if sample_hash(sample) == prev.sample_hash:
+        return ChangeDecision.SKIP("轻量采样 hash 一致")
+
+    full = render_and_clean(url)                             # L3: 全量渲染 + 清洗
+    if full.content_hash == prev.content_hash:
+        return ChangeDecision.SKIP("清洗后内容 hash 一致(仅动态噪音)")
+    return ChangeDecision.CHANGED(full)
+```
+
+### 5.2 归一化去抖（算 hash 前必做）
+
+网页常有动态注入（时间戳、csrf token、随机广告位、访问计数器），字节每次都变但语义没变。L3 的 `contentHash` 必须在清洗后归一化再算：
+
+```
+① 剥离动态噪音: 时间戳 / 当前日期 / 随机推荐位 / "X分钟前更新" 等
+② 规范化: 折叠连续空白 / 统一引号 / 图片仅记数量与 alt, 忽略 URL 变化
+```
+
+只有归一化后的 hash 变化，才代表"内容语义变了"。
+
+### 5.3 变化确认后：是否重爬决策树
+
+```
+L3 hash 不同 → 判断"变化量"
+  ├─ 结构化内容未变(仅样式/布局变) → 不重爬
+  ├─ 单章节变化 → 局部重爬(只抓变更章节) → 章节级增量 diff
+  └─ 大范围变化 → 全页重爬 → 重新清洗 → 走增量 diff(复用 outline + 旧 chunk)
+```
+
+重爬不等于全量重入库：`diffChunks` 按 `(doc_id, outline_path)` 三态比对，不变的章节 SKIP、不重新 embed。
+
+### 5.4 手动分块边界失效（网页增量最脆弱一环）
+
+手动块边界是 markdown 的 `md_start/md_end` **偏移量**——网页一旦变化，哪怕只改一个词，后续所有偏移全部错位，已保存的手动块可能整体失效。解决：**双锚点定位 + 章节级判定**。
+
+```sql
+-- chunk_edit 增加内容锚字段
+ALTER TABLE t_knowledge_document_chunk_edit
+    ADD COLUMN anchor_text VARCHAR(512);   -- 块首句/首行文本(语义锚点, 抗偏移)
+```
+
+```
+chunk_edit 两级定位:
+  ① 内容锚 anchor_text: 块首行文本 (语义锚点, 网页变化后仍能定位)
+  ② 位置锚 md_start/md_end: 快速切片 (仅同一版本内有效)
+
+网页重爬后处理:
+  按新 markdown 中该块 outline 所在章节是否变化
+  ├─ 章节没变 → 块保留, 用 anchor_text 在新版本中重新定位, 校正偏移
+  └─ 章节变了 → 块标记 status=2 失效, 前端提示用户重新分块
+```
+
+### 5.5 与增量更新方案的衔接
+
+若用户的可点击分块产生的是**基于 markdown 偏移区间**的边界配置，天然可以与增量更新方案对接：
 
 - `chunk_edit.outline` 字段可提取为 `t_knowledge_chunk.outline_path`（增量 diff 的稳定身份）
 - `md_start/md_end` 区间内容 hash 计算后作为 `content_hash` 参与 diff
-- 网页内容变化 → 重新爬取 → 旧边界失效 → 用户重分块 → 增量 diff 只入库变化部分
+- 网页内容变化 → 三层信号确认 → 局部/全量重爬 → 手动块按内容锚校正或失效 → 增量 diff 只入库变化部分
+
+| 触发场景 | 变更信号 | 是否重爬 | 已入库 chunk 处理 |
+|---|---|---|---|
+| 定时刷新（现有 schedule） | L1 → L2 → L3 三级 | 语义变化才重爬 | 章节级 diff，不变块保留 |
+| Webhook 带版本号 | 版本号 + 变更章节列表 | 只重爬变更章节 | 仅变更章节的块失效 |
+| 手动触发"立即刷新" | 强制 L3 | 全页重爬 | 全量 diff，手动块按锚点校正 |
 
 ---
 
