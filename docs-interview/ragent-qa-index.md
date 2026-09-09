@@ -54,6 +54,7 @@
 
 | 问题 | 定位 |
 |:---|:---|
+| ★ 双项目 × 业界 意图识别/路由总纲（ragent 树 vs PA 分发） | [总纲](<intent-recognition-routing-qa.md#pa-int-q0>) |
 | 意图树有默认实现吗？怎么配置？ | [一、意图树配置](<ragent-intent-rewrite-config.md#intent-tree-config>) |
 | KB 意图识别 classifyTargets 6 步 | [2.1](<ragent-intent-rewrite-config.md#classify-targets>) |
 | 意图识别四个消费点 | [2.2](<ragent-intent-rewrite-config.md#intent-consumers>) |

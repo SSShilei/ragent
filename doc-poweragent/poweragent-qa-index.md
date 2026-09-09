@@ -81,6 +81,7 @@
 
 | 问题 | 来源 |
 |:---|:---|
+| ★ 双项目 × 业界 意图识别/路由总纲（ragent 树 vs PA 分发） | [总纲](<../docs-interview/intent-recognition-routing-qa.md#pa-int-q0>) |
 | 意图识别到底是什么？ | [核心Q28](<Agent 核心机制面试 Q&A.md#q28>) |
 | 意图识别和 Rewrite 怎么实现？ | [核心Q22](<Agent 核心机制面试 Q&A.md#q22>) / [美团Q22](<美团 Agent  Q&A.md#q22>) |
 | 意图识别和 Rewrite 的关系 | [核心Q29](<Agent 核心机制面试 Q&A.md#q29>) |
@@ -173,6 +174,8 @@
 |:---|:---|
 | 部署性能与并发控制？ | [模块09Q37](<模块源码分析 09-10：Trace_日志 + 评测体系 + Sentinel 熔断 + 部署性能并发 (1).md#q37>) |
 | 项目难点？ | [模块09Q38](<模块源码分析 09-10：Trace_日志 + 评测体系 + Sentinel 熔断 + 部署性能并发 (1).md#q38>) |
+| 高并发/低延迟怎么保证 + 容量估算 + 生产配置？ | [容量QA Q1](<../docs-interview/poweragent-capacity-concurrency-qa.md#pa-cap-q1>) [Q2](<../docs-interview/poweragent-capacity-concurrency-qa.md#pa-cap-q2>) [Q3](<../docs-interview/poweragent-capacity-concurrency-qa.md#pa-cap-q3>) |
+| 并发正确性(分布式锁/DB事务/一致性分级) + 高可用措施？ | [高并发高可用总纲 Q4](<../docs-interview/poweragent-capacity-concurrency-qa.md#pa-cap-q4>) [Q5](<../docs-interview/poweragent-capacity-concurrency-qa.md#pa-cap-q5>) [Q6](<../docs-interview/poweragent-capacity-concurrency-qa.md#pa-cap-q6>) |
 | SSE reqId 频道 vs WebSocket？ | [模块02Q7](<模块源码分析 02：知识库_搜索.md#q7>) |
 | LLM 模型路由怎么做？ | [模块02Q8](<模块源码分析 02：知识库_搜索.md#q8>) |
 | streaming 端到端怎么实现？ | [源码Q7](<Agent 开发面试源码 Q&A.md#q7>) |
